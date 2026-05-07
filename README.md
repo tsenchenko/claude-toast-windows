@@ -37,7 +37,7 @@ Click "Open VS Code" on the toast to bring the right VS Code window forward (mat
 
 - Windows 10 or 11
 - PowerShell 5.1 (default on every modern Windows) or PowerShell 7+
-- [Claude Code](https://claude.com/claude-code) installed (CLI or VS Code extension)
+- [Claude Code](https://claude.com/claude-code) in the **VS Code extension**. The CLI works for notifications too, but the "Open VS Code" toast button targets a VS Code window — there's no equivalent for terminal sessions
 - Internet for first-time install (downloads the BurntToast PowerShell module)
 
 ## Install
