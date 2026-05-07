@@ -26,9 +26,11 @@ Click "Open VS Code" on the toast to bring the right VS Code window forward (mat
 ## Features
 
 - Toast on `Stop` event (Claude finishes its turn)
-- Toast on `Notification` event (waiting for your input or permission), showing the actual prompt text
+- Toast on `Notification` event (permission prompts, idle prompts), showing the actual prompt text
+- Toast on `PreToolUse` for `AskUserQuestion` and `ExitPlanMode` — covers in-chat questions and plan-mode approval, which Claude Code does **not** dispatch through the `Notification` event
+- The question text is surfaced in the toast body, so you know what's being asked without switching apps
 - "Open VS Code" button focuses the correct window — even if you have multiple VS Code windows open, it picks the one running this Claude Code session
-- **Auto-suppressed** if VS Code is already the foreground window, so you don't get spammed when you're already there
+- The Stop toast is **suppressed** when VS Code is already foreground (low-priority "I'm done" event); question/permission toasts always show, since at hook-dispatch time you may not have switched away yet
 - Toasts auto-dismiss after 60 seconds (configurable via `MessageDuration`)
 - Per-user install — no admin rights needed
 - Lives in `~/.claude/settings.local.json` so it doesn't interfere with anything synced via `~/.claude/settings.json`
@@ -54,7 +56,7 @@ The installer will:
 2. Copy `notify.ps1` and `focus-vscode.ps1` to `~/.claude/hooks/`
 3. Register the `claude-focus://` URL protocol under `HKCU\Software\Classes\claude-focus`
 4. Set toast banner duration to 60 seconds (`HKCU:\Control Panel\Accessibility\MessageDuration`)
-5. Merge `Stop` and `Notification` hooks into `~/.claude/settings.local.json` (other keys are preserved)
+5. Merge `Stop`, `Notification`, and `PreToolUse` (matched on `AskUserQuestion|ExitPlanMode`) hooks into `~/.claude/settings.local.json` (other keys are preserved)
 6. Send a test toast to confirm it works
 
 After install, **restart any open Claude Code session** so it picks up the new hooks.
@@ -117,7 +119,12 @@ This removes the hook scripts, unregisters the URL protocol, removes the `hooks`
 
 ### Components
 
-- **Hooks in `settings.local.json`** — Claude Code natively supports running shell commands on lifecycle events. We attach to `Stop` (turn complete) and `Notification` (input/permission needed). [Hook docs.](https://docs.claude.com/en/docs/claude-code/hooks)
+- **Hooks in `settings.local.json`** — Claude Code natively supports running shell commands on lifecycle events. We attach to three:
+  - `Stop` — turn complete
+  - `Notification` — permission prompts and idle prompts
+  - `PreToolUse` matched on `AskUserQuestion|ExitPlanMode` — fires for in-chat questions and plan-mode approval (these don't go through the `Notification` event in current Claude Code)
+
+  [Hook docs.](https://docs.claude.com/en/docs/claude-code/hooks)
 - **`notify.ps1`** — receives event JSON on stdin. First checks `GetForegroundWindow` + process name to skip when VS Code is already focused. Then either uses the hardcoded "turn complete" text (Stop) or the `message` field from the event JSON (Notification). Renders the toast through BurntToast.
 - **`focus-vscode.ps1`** — invoked when the toast button is clicked. Reads the project folder name (saved by `notify.ps1`) and matches it against `MainWindowTitle` of running `Code.exe` processes to pick the right window, then brings it forward via Win32 API.
 - **`claude-focus://` URL protocol** — Windows toast buttons can only trigger one of three activation types: a URL protocol, foreground app activation (needs a registered AppUserModelID), or background COM activation. We use a custom URL protocol because it's the simplest to register from a per-user installer.
