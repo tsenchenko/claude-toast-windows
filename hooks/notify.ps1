@@ -55,7 +55,14 @@ if ($data -and $data.cwd) {
 if ($Event -eq 'Notification') {
     $title = 'Claude Code: needs your attention'
     if ($data -and $data.message) {
+        # Plain Notification event (permission_prompt, idle_prompt, etc.)
         $body = [string]$data.message
+    } elseif ($data -and $data.tool_input -and $data.tool_input.questions -and $data.tool_input.questions.Count -gt 0) {
+        # PreToolUse on AskUserQuestion — surface the first question's text
+        $body = [string]$data.tool_input.questions[0].question
+    } elseif ($data -and $data.tool_input -and $data.tool_input.plan) {
+        # PreToolUse on ExitPlanMode — Claude is asking you to approve a plan
+        $body = 'Claude is proposing a plan — your approval is needed'
     } else {
         $body = 'Waiting for your input in VS Code'
     }

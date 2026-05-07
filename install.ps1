@@ -112,6 +112,15 @@ $hooksBlock = [PSCustomObject]@{
             hooks   = @( [PSCustomObject]@{ type = 'command'; command = $cmdNotify } )
         }
     )
+    # PreToolUse fires for in-chat questions (AskUserQuestion) and plan-mode approval
+    # (ExitPlanMode). The Notification event does NOT cover these in current Claude Code,
+    # so we hook PreToolUse and reuse the same notify.ps1 with -Event Notification.
+    PreToolUse = @(
+        [PSCustomObject]@{
+            matcher = 'AskUserQuestion|ExitPlanMode'
+            hooks   = @( [PSCustomObject]@{ type = 'command'; command = $cmdNotify } )
+        }
+    )
 }
 
 if ($settings.PSObject.Properties.Name -contains 'hooks') {
