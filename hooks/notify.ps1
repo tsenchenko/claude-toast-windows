@@ -4,6 +4,10 @@ param(
     [string]$Event
 )
 
+# Force stdin to UTF-8. Claude Code passes JSON as UTF-8, but PowerShell 5.1 reads
+# stdin in the default OEM codepage and mangles non-ASCII characters in the message.
+try { [Console]::InputEncoding = [System.Text.Encoding]::UTF8 } catch { }
+
 # Suppress only the Stop toast when VS Code is foreground — turn-complete is low-priority.
 # Notification toasts (questions, permission requests) always show: at the moment the hook
 # fires VS Code is usually still focused (the user just sent a prompt), and missing a
