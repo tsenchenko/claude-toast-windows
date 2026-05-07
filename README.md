@@ -10,12 +10,12 @@
 
 Claude Code in the VS Code extension on Windows has no native desktop notifications. There's a built-in setting (`preferredNotifChannel`) but it only works in terminal emulators like iTerm2, Ghostty, or Kitty — not in the VS Code extension.
 
-So if you walk away from your machine, you have no way to know when:
+So while Claude is working, if you switch to another window — a browser tab, another VS Code workspace, your terminal, anything — you have no way to know when:
 
 - Claude has **finished its turn** and is waiting for your next prompt
 - Claude is **asking a question** or **requesting permission** to run a tool
 
-You either keep VS Code in focus and watch the screen, or you lose minutes every time you context-switch back.
+Either you keep VS Code in focus and stare at the screen, or you lose minutes on every context switch back to check whether Claude is still running.
 
 ## The solution
 
