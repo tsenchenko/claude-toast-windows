@@ -70,7 +70,7 @@ New-ItemProperty -Path $key -Name '(default)'    -Value 'URL:Claude Focus' -Prop
 New-ItemProperty -Path $key -Name 'URL Protocol' -Value ''                 -PropertyType String -Force | Out-Null
 $cmdKey = "$key\shell\open\command"
 New-Item -Path $cmdKey -Force | Out-Null
-$focusCmd = "powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$hooksDir\focus-vscode.ps1`""
+$focusCmd = "powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$hooksDir\focus-vscode.ps1`" `"%1`""
 New-ItemProperty -Path $cmdKey -Name '(default)' -Value $focusCmd -PropertyType String -Force | Out-Null
 Write-Ok "Protocol registered"
 

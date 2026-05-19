@@ -8,11 +8,17 @@ param(
 # stdin in the default OEM codepage and mangles non-ASCII characters in the message.
 try { [Console]::InputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 
+$logFile = Join-Path $env:TEMP 'claude-toast.log'
+function Log { param([string]$Msg)
+    try { "$([DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss')) [$Event] $Msg" | Out-File -FilePath $logFile -Append -Encoding utf8 } catch { }
+}
+
 # Suppress only the Stop toast when VS Code is foreground — turn-complete is low-priority.
 # Notification toasts (questions, permission requests) always show: at the moment the hook
 # fires VS Code is usually still focused (the user just sent a prompt), and missing a
 # question is far worse than a redundant toast.
-if ($Event -eq 'Stop') {
+# Override via $env:CLAUDE_TOAST_ALWAYS=1 — useful when debugging.
+if ($Event -eq 'Stop' -and -not $env:CLAUDE_TOAST_ALWAYS) {
     try {
         Add-Type @"
 using System;
@@ -29,6 +35,7 @@ public class FgUtil {
         if ($targetPid -ne 0) {
             $proc = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
             if ($proc -and $proc.ProcessName -eq 'Code') {
+                Log "suppressed: VS Code in foreground"
                 exit 0
             }
         }
@@ -71,15 +78,16 @@ if ($Event -eq 'Notification') {
     $body = 'Ready for your next prompt'
 }
 
+if ([string]::IsNullOrEmpty($body)) { $body = ' ' }
 # Toast body has length limits
-if ($body.Length -gt 200) {
-    $body = $body.Substring(0, 197) + '...'
-}
+if ($body.Length -gt 200) { $body = $body.Substring(0, 197) + '...' }
 
 try {
     Import-Module BurntToast -ErrorAction Stop
 
-    $btnOpen = New-BTButton -Content 'Open VS Code' -Arguments 'claude-focus://activate'
+    # -ActivationType Protocol is the default in BurntToast 1.1.0, but spell it out
+    # so the chain doesn't break if a future version changes the default.
+    $btnOpen = New-BTButton -Content 'Open VS Code' -Arguments 'claude-focus://activate' -ActivationType Protocol
     $btnDismiss = New-BTButton -Dismiss
 
     $textTitle = New-BTText -Text $title
@@ -87,10 +95,18 @@ try {
     $binding = New-BTBinding -Children $textTitle, $textBody
     $visual = New-BTVisual -BindingGeneric $binding
     $action = New-BTAction -Buttons $btnOpen, $btnDismiss
-    $content = New-BTContent -Visual $visual -Actions $action
+
+    # -Launch + -ActivationType Protocol on the content makes the ENTIRE toast
+    # clickable, not just the button. Critical when the toast has slid into the
+    # Action Center and only the title is visible, or the user mis-clicks past
+    # the small button.
+    $content = New-BTContent -Visual $visual -Actions $action `
+        -Launch 'claude-focus://activate' -ActivationType Protocol
 
     Submit-BTNotification -Content $content
+    Log "submitted: '$title' / '$body'"
 } catch {
     # Never break the Claude Code session over a failed notification
+    Log "FAILED: $($_.Exception.Message)"
     exit 0
 }
