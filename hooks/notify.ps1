@@ -13,34 +13,10 @@ function Log { param([string]$Msg)
     try { "$([DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss')) [$Event] $Msg" | Out-File -FilePath $logFile -Append -Encoding utf8 } catch { }
 }
 
-# Suppress only the Stop toast when VS Code is foreground — turn-complete is low-priority.
-# Notification toasts (questions, permission requests) always show: at the moment the hook
-# fires VS Code is usually still focused (the user just sent a prompt), and missing a
-# question is far worse than a redundant toast.
-# Override via $env:CLAUDE_TOAST_ALWAYS=1 — useful when debugging.
-if ($Event -eq 'Stop' -and -not $env:CLAUDE_TOAST_ALWAYS) {
-    try {
-        Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class FgUtil {
-    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-}
-"@ -ErrorAction Stop
-
-        $hwnd = [FgUtil]::GetForegroundWindow()
-        $targetPid = 0
-        [FgUtil]::GetWindowThreadProcessId($hwnd, [ref]$targetPid) | Out-Null
-        if ($targetPid -ne 0) {
-            $proc = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
-            if ($proc -and $proc.ProcessName -eq 'Code') {
-                Log "suppressed: VS Code in foreground"
-                exit 0
-            }
-        }
-    } catch { }
-}
+# Previously this script suppressed the Stop toast when VS Code was the foreground
+# window ("you're looking at it, you don't need a toast"). In practice users live in
+# VS Code all day, and the suppress branch fired on almost every turn — so they never
+# saw a toast. Removed: toasts now always show.
 
 # Read event context (JSON) from stdin
 $stdin = [Console]::In.ReadToEnd()

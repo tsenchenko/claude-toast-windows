@@ -28,7 +28,7 @@ Click "Open VS Code" on the toast to bring the right VS Code window forward (mat
 - Toast on `PreToolUse` for `AskUserQuestion` and `ExitPlanMode` — covers in-chat questions and plan-mode approval, which Claude Code does **not** dispatch through the `Notification` event
 - The question text is surfaced in the toast body, so you know what's being asked without switching apps
 - "Open VS Code" button focuses the correct window — even if you have multiple VS Code windows open, it picks the one running this Claude Code session
-- The Stop toast is **suppressed** when VS Code is already foreground (low-priority "I'm done" event); question/permission toasts always show, since at hook-dispatch time you may not have switched away yet
+- Toasts always show — including for Stop events. (An earlier version suppressed Stop when VS Code was foreground, but in practice you live in VS Code all day and that branch fired on almost every turn, so you never saw a toast.)
 - Toasts auto-dismiss after 60 seconds (configurable via `MessageDuration`)
 - Per-user install — no admin rights needed
 - Lives in `~/.claude/settings.local.json` so it doesn't interfere with anything synced via `~/.claude/settings.json`
@@ -64,7 +64,7 @@ After install, **restart any open Claude Code session** so it picks up the new h
 Open `~/.claude/hooks/notify.ps1` and edit. Common tweaks:
 
 - **Change the text** — find the `$title` and `$body` lines and rewrite
-- **Disable the foreground-window check** (always notify, even when VS Code is focused) — delete the `try { Add-Type ...` block at the top
+- **Re-add a foreground-window check** (skip the toast when VS Code is focused) — wrap the body in a `GetForegroundWindow` + process-name check; see git history for the old block
 - **Change the buttons** — see [BurntToast docs](https://github.com/Windos/BurntToast#new-btbutton)
 
 The hook reads the script fresh on every event, so no reinstall is needed after edits.
@@ -91,9 +91,6 @@ This removes the hook scripts, unregisters the URL protocol, removes the `hooks`
 │ Claude Code  ├──────────────────────────────────────►│  notify.ps1  │
 └──────────────┘   (event JSON piped to script stdin)  └──────┬───────┘
                                                               │
-                                       VS Code in foreground? │
-                                       └─ yes → exit silently │
-                                       └─ no  → continue ─────┤
                                                               ▼
                                                        ┌──────────────┐
                                                        │  BurntToast  │──► Windows Toast
@@ -123,7 +120,7 @@ This removes the hook scripts, unregisters the URL protocol, removes the `hooks`
   - `PreToolUse` matched on `AskUserQuestion|ExitPlanMode` — fires for in-chat questions and plan-mode approval (these don't go through the `Notification` event in current Claude Code)
 
   [Hook docs.](https://docs.claude.com/en/docs/claude-code/hooks)
-- **`notify.ps1`** — receives event JSON on stdin. First checks `GetForegroundWindow` + process name to skip when VS Code is already focused. Then either uses the hardcoded "turn complete" text (Stop) or the `message` field from the event JSON (Notification). Renders the toast through BurntToast.
+- **`notify.ps1`** — receives event JSON on stdin. Uses the hardcoded "turn complete" text (Stop), the `message` field from the event JSON (Notification), or the question/plan text (PreToolUse). Renders the toast through BurntToast. Logs to `%TEMP%\claude-toast.log` so failures are diagnosable.
 - **`focus-vscode.ps1`** — invoked when the toast button is clicked. Reads the project folder name (saved by `notify.ps1`) and matches it against `MainWindowTitle` of running `Code.exe` processes to pick the right window, then brings it forward via Win32 API.
 - **`claude-focus://` URL protocol** — Windows toast buttons can only trigger one of three activation types: a URL protocol, foreground app activation (needs a registered AppUserModelID), or background COM activation. We use a custom URL protocol because it's the simplest to register from a per-user installer.
 
