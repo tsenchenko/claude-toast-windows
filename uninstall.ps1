@@ -4,9 +4,9 @@
 
 .DESCRIPTION
     Reverses what install.ps1 did: removes the hook scripts, unregisters the
-    claude-focus:// URL protocol, removes the hooks block from
-    ~/.claude/settings.local.json (other keys are preserved), and resets
-    the Windows MessageDuration setting.
+    claude-focus:// URL protocol, removes the Stop/Notification/PreToolUse
+    entries from ~/.claude/settings.json (other event keys like SessionStart
+    are preserved), and resets the Windows MessageDuration setting.
 
     BurntToast is left installed (you may rely on it elsewhere). Remove it
     manually with: Uninstall-Module BurntToast
@@ -24,7 +24,7 @@ Write-Host ""
 # 1. Hook scripts
 Write-Step "Removing hook scripts"
 $hooksDir = Join-Path $HOME '.claude\hooks'
-foreach ($f in @('notify.ps1', 'focus-vscode.ps1')) {
+foreach ($f in @('notify.sh', 'notify.ps1', 'focus-vscode.ps1')) {
     $p = Join-Path $hooksDir $f
     if (Test-Path $p) { Remove-Item $p -Force; Write-Ok "Deleted $f" }
 }
@@ -52,23 +52,42 @@ if (Test-Path $accPath) {
     }
 }
 
-# 4. Remove hooks block from settings.local.json (keep other keys)
-Write-Step "Cleaning settings.local.json"
-$settingsPath = Join-Path $HOME '.claude\settings.local.json'
+# 4. Remove only the events we own from settings.json. We do NOT delete the whole
+# hooks block — the user may have other event types in there (e.g. SessionStart).
+Write-Step "Cleaning settings.json"
+$settingsPath = Join-Path $HOME '.claude\settings.json'
 if (Test-Path $settingsPath) {
     try {
         $raw = Get-Content -Path $settingsPath -Raw -Encoding UTF8
         if ($raw.Trim()) {
             $settings = $raw | ConvertFrom-Json
             if ($settings.PSObject.Properties.Name -contains 'hooks') {
-                $settings.PSObject.Properties.Remove('hooks')
+                $ours = @('Stop','Notification','PreToolUse')
+                $removed = @()
+                foreach ($k in $ours) {
+                    if ($settings.hooks.PSObject.Properties.Name -contains $k) {
+                        $cmd = $settings.hooks.$k[0].hooks[0].command
+                        if ($cmd -match 'notify\.sh|notify\.ps1') {
+                            $settings.hooks.PSObject.Properties.Remove($k)
+                            $removed += $k
+                        }
+                    }
+                }
+                # Если hooks-блок остался пустым — снести его целиком
+                if (-not $settings.hooks.PSObject.Properties.Name) {
+                    $settings.PSObject.Properties.Remove('hooks')
+                }
                 $json = $settings | ConvertTo-Json -Depth 12
                 [System.IO.File]::WriteAllText($settingsPath, $json, (New-Object System.Text.UTF8Encoding($false)))
-                Write-Ok "hooks block removed"
+                if ($removed.Count -gt 0) {
+                    Write-Ok ("Removed events: " + ($removed -join ', '))
+                } else {
+                    Write-Ok "No matching event entries found (already clean)"
+                }
             }
         }
     } catch {
-        Write-Host "    Could not parse settings.local.json — leaving it alone." -ForegroundColor Yellow
+        Write-Host "    Could not parse settings.json — leaving it alone." -ForegroundColor Yellow
     }
 }
 

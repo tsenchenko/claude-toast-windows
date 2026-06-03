@@ -37,6 +37,7 @@ Click "Open VS Code" on the toast to bring the right VS Code window forward (mat
 
 - Windows 10 or 11
 - PowerShell 5.1 (default on every modern Windows) or PowerShell 7+
+- **[Git for Windows](https://git-scm.com/download/win)** — Claude Code dispatches hook commands through Git Bash on Windows. The hook command in `settings.json` is a single portable `"$HOME/.claude/hooks/notify.sh"` line that works on both Mac and Windows; Git Bash is what executes it on Windows.
 - [Claude Code](https://claude.com/claude-code) in the **VS Code extension**. The CLI works for notifications too, but the "Open VS Code" toast button targets a VS Code window — there's no equivalent for terminal sessions
 - Internet for first-time install (downloads the BurntToast PowerShell module)
 
@@ -50,24 +51,29 @@ irm https://raw.githubusercontent.com/tsenchenko/claude-toast-windows/main/insta
 
 The installer will:
 
-1. Install the [BurntToast](https://github.com/Windos/BurntToast) PowerShell module (CurrentUser scope, no admin)
-2. Copy `notify.ps1` and `focus-vscode.ps1` to `~/.claude/hooks/`
-3. Register the `claude-focus://` URL protocol under `HKCU\Software\Classes\claude-focus`
-4. Set toast banner duration to 60 seconds (`HKCU:\Control Panel\Accessibility\MessageDuration`)
-5. Merge `Stop`, `Notification`, and `PreToolUse` (matched on `AskUserQuestion|ExitPlanMode`) hooks into `~/.claude/settings.local.json` (other keys are preserved)
-6. Send a test toast to confirm it works
+1. Verify Git for Windows / Git Bash is present (required to run hook commands)
+2. Install the [BurntToast](https://github.com/Windos/BurntToast) PowerShell module (CurrentUser scope, no admin)
+3. Copy `notify.sh`, `notify.ps1`, and `focus-vscode.ps1` to `~/.claude/hooks/`
+4. Register the `claude-focus://` URL protocol under `HKCU\Software\Classes\claude-focus`
+5. Set toast banner duration to 60 seconds (`HKCU:\Control Panel\Accessibility\MessageDuration`)
+6. Merge `Stop`, `Notification`, and `PreToolUse` (matched on `AskUserQuestion|ExitPlanMode`) hooks into `~/.claude/settings.json` using the portable command form `"$HOME/.claude/hooks/notify.sh" <Event>`. Existing event entries are preserved.
+7. Send a test toast to confirm it works
 
-After install, **restart any open Claude Code session** so it picks up the new hooks.
+After install, **restart any open Claude Code session** so it picks up the new hooks (`Ctrl+Shift+P` → `Developer: Reload Window`).
+
+### Sharing settings.json across machines
+
+The hook command (`"$HOME/.claude/hooks/notify.sh" <Event>`) is intentionally portable — same string on Mac and Windows. If you sync `~/.claude/settings.json` between machines (Dropbox, Google Drive, Syncthing, dotfiles), the same `hooks` block works on both, as long as each OS has its own `notify.sh` locally. The macOS counterpart of this project provides the Mac-side `notify.sh`.
 
 ## Customize
 
-Open `~/.claude/hooks/notify.ps1` and edit. Common tweaks:
+The toast itself is rendered in `~/.claude/hooks/notify.ps1` (PowerShell + BurntToast). `notify.sh` is a thin bash wrapper that forwards the event to it. Common tweaks all live in `notify.ps1`:
 
 - **Change the text** — find the `$title` and `$body` lines and rewrite
 - **Re-add a foreground-window check** (skip the toast when VS Code is focused) — wrap the body in a `GetForegroundWindow` + process-name check; see git history for the old block
 - **Change the buttons** — see [BurntToast docs](https://github.com/Windos/BurntToast#new-btbutton)
 
-The hook reads the script fresh on every event, so no reinstall is needed after edits.
+Both scripts are read fresh on every event, so no reinstall is needed after edits.
 
 To change the dismiss timeout:
 
@@ -82,46 +88,53 @@ Set-ItemProperty -Path "HKCU:\Control Panel\Accessibility" -Name MessageDuration
 irm https://raw.githubusercontent.com/tsenchenko/claude-toast-windows/main/uninstall.ps1 | iex
 ```
 
-This removes the hook scripts, unregisters the URL protocol, removes the `hooks` block from `settings.local.json`, and resets `MessageDuration`. BurntToast itself stays installed in case you use it elsewhere — remove it manually with `Uninstall-Module BurntToast` if you want.
+This removes the hook scripts, unregisters the URL protocol, removes the `Stop` / `Notification` / `PreToolUse` entries from `~/.claude/settings.json` (other event keys like `SessionStart` are preserved), and resets `MessageDuration`. BurntToast and Git for Windows stay installed in case you use them elsewhere — remove BurntToast manually with `Uninstall-Module BurntToast` if you want.
 
 ## How it works
 
 ```
-┌──────────────┐      Stop / Notification event       ┌──────────────┐
-│ Claude Code  ├──────────────────────────────────────►│  notify.ps1  │
-└──────────────┘   (event JSON piped to script stdin)  └──────┬───────┘
-                                                              │
-                                                              ▼
-                                                       ┌──────────────┐
-                                                       │  BurntToast  │──► Windows Toast
-                                                       └──────────────┘
-                                                              │
-                                            user clicks "Open VS Code"
-                                                              ▼
-                                              claude-focus:// URL protocol
-                                                              │
-                                                              ▼
-                                                       ┌──────────────────┐
-                                                       │ focus-vscode.ps1 │
-                                                       └──────────────────┘
-                                                              │
-                                                              ▼
-                                            Win32: SetForegroundWindow +
-                                                   SwitchToThisWindow on
-                                            the VS Code window whose title
-                                            matches the project folder
+┌──────────────┐    Stop / Notification event     ┌──────────┐      ┌────────────┐
+│ Claude Code  ├──────────────────────────────────►│ Git Bash ├─────►│ notify.sh  │
+└──────────────┘  ("$HOME/.claude/hooks/notify.sh" └──────────┘      └─────┬──────┘
+                   <Event> — same on Mac & Win)                           │ forward
+                                                                          │ (JSON on stdin,
+                                                                          │  event as arg)
+                                                                          ▼
+                                                                   ┌──────────────┐
+                                                                   │  notify.ps1  │
+                                                                   └──────┬───────┘
+                                                                          │
+                                                                          ▼
+                                                                   ┌──────────────┐
+                                                                   │  BurntToast  │──► Toast
+                                                                   └──────────────┘
+                                                                          │
+                                                user clicks "Open VS Code"│
+                                                                          ▼
+                                                            claude-focus:// URL protocol
+                                                                          │
+                                                                          ▼
+                                                                   ┌──────────────────┐
+                                                                   │ focus-vscode.ps1 │
+                                                                   └──────────────────┘
+                                                                          │
+                                                                          ▼
+                                                       Win32: AttachThreadInput + SetForegroundWindow
+                                                       on the VS Code window whose title matches the
+                                                       project's leaf folder (from event.cwd)
 ```
 
 ### Components
 
-- **Hooks in `settings.local.json`** — Claude Code natively supports running shell commands on lifecycle events. We attach to three:
+- **Hooks in `settings.json`** — Claude Code natively supports running shell commands on lifecycle events. We attach to three:
   - `Stop` — turn complete
   - `Notification` — permission prompts and idle prompts
   - `PreToolUse` matched on `AskUserQuestion|ExitPlanMode` — fires for in-chat questions and plan-mode approval (these don't go through the `Notification` event in current Claude Code)
 
-  [Hook docs.](https://docs.claude.com/en/docs/claude-code/hooks)
+  All three use the same portable command `"$HOME/.claude/hooks/notify.sh" <Event>`. On Windows Claude Code dispatches it through Git Bash. [Hook docs.](https://docs.claude.com/en/docs/claude-code/hooks)
+- **`notify.sh`** — thin bash wrapper. Logs the invocation to `%TEMP%\claude-toast-sh.log` (proves the hook fired), then pipes the event JSON to `notify.ps1`. Same interface as the macOS counterpart, so the `hooks` block in `settings.json` is identical across machines.
 - **`notify.ps1`** — receives event JSON on stdin. Uses the hardcoded "turn complete" text (Stop), the `message` field from the event JSON (Notification), or the question/plan text (PreToolUse). Renders the toast through BurntToast. Logs to `%TEMP%\claude-toast.log` so failures are diagnosable.
-- **`focus-vscode.ps1`** — invoked when the toast button is clicked. Reads the project folder name (saved by `notify.ps1`) and matches it against `MainWindowTitle` of running `Code.exe` processes to pick the right window, then brings it forward via Win32 API.
+- **`focus-vscode.ps1`** — invoked when the toast button is clicked. Reads the project folder name (saved by `notify.ps1`) and matches it against `MainWindowTitle` of running `Code.exe` processes to pick the right window, then brings it forward via Win32 API. Uses `AttachThreadInput` + `AllowSetForegroundWindow` to bypass UIPI — Action Center launches the protocol handler without foreground rights, so a plain `SetForegroundWindow` silently fails.
 - **`claude-focus://` URL protocol** — Windows toast buttons can only trigger one of three activation types: a URL protocol, foreground app activation (needs a registered AppUserModelID), or background COM activation. We use a custom URL protocol because it's the simplest to register from a per-user installer.
 
 ### Why a custom URL protocol instead of `vscode://`?
@@ -148,7 +161,8 @@ claude-toast-windows/
 ├── install.ps1          # one-shot installer
 ├── uninstall.ps1        # one-shot uninstaller
 └── hooks/
-    ├── notify.ps1       # the toast renderer
+    ├── notify.sh        # bash entry point (called by Claude Code via Git Bash)
+    ├── notify.ps1       # the toast renderer (called by notify.sh)
     └── focus-vscode.ps1 # the "Open VS Code" handler
 ```
 
