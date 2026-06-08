@@ -133,7 +133,12 @@ This removes the hook scripts, unregisters the URL protocol, removes the `Stop` 
 
   All three use the same portable command `"$HOME/.claude/hooks/notify.sh" <Event>`. On Windows Claude Code dispatches it through Git Bash. [Hook docs.](https://docs.claude.com/en/docs/claude-code/hooks)
 - **`notify.sh`** — thin bash wrapper. Logs the invocation to `%TEMP%\claude-toast-sh.log` (proves the hook fired), then pipes the event JSON to `notify.ps1`. Same interface as the macOS counterpart, so the `hooks` block in `settings.json` is identical across machines.
-- **`notify.ps1`** — receives event JSON on stdin. Uses the hardcoded "turn complete" text (Stop), the `message` field from the event JSON (Notification), or the question/plan text (PreToolUse). Renders the toast through BurntToast. Logs to `%TEMP%\claude-toast.log` so failures are diagnosable.
+- **`notify.ps1`** — receives event JSON on stdin and renders the toast through BurntToast. Per-event behavior:
+  - `Stop` — hardcoded "turn complete" toast
+  - `Notification` — uses the `message` field from the event JSON
+  - `PreToolUse` — toasts only when there's something to react to: `AskUserQuestion` (shows the question text), `ExitPlanMode` (plan approval), or a permission-prompt (detected via a `permission_decision` / `permissionRequired` field on the event). Auto-approved tool calls (Read/Edit/Write on allow-listed files) are silently skipped to avoid spam.
+  - `PostToolUse` — silently skipped (tool completion is not a toast-worthy moment)
+  - Logs every decision to `%TEMP%\claude-toast.log`. Also writes the last raw JSON of each event type to `%TEMP%\claude-event-<Event>-last.json` for debugging when Claude Code changes its event schema.
 - **`focus-vscode.ps1`** — invoked when the toast button is clicked. Reads the project folder name (saved by `notify.ps1`) and matches it against `MainWindowTitle` of running `Code.exe` processes to pick the right window, then brings it forward via Win32 API. Uses `AttachThreadInput` + `AllowSetForegroundWindow` to bypass UIPI — Action Center launches the protocol handler without foreground rights, so a plain `SetForegroundWindow` silently fails.
 - **`claude-focus://` URL protocol** — Windows toast buttons can only trigger one of three activation types: a URL protocol, foreground app activation (needs a registered AppUserModelID), or background COM activation. We use a custom URL protocol because it's the simplest to register from a per-user installer.
 

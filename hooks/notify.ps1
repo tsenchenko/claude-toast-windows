@@ -1,11 +1,9 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Stop', 'Notification')]
     [string]$Event
 )
 
-# Force stdin to UTF-8. Claude Code passes JSON as UTF-8, but PowerShell 5.1 reads
-# stdin in the default OEM codepage and mangles non-ASCII characters in the message.
+# stdin как UTF-8 (Claude Code шлёт JSON в UTF-8, PS 5.1 без этого ломает кириллицу)
 try { [Console]::InputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 
 $logFile = Join-Path $env:TEMP 'claude-toast.log'
@@ -13,19 +11,14 @@ function Log { param([string]$Msg)
     try { "$([DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss')) [$Event] $Msg" | Out-File -FilePath $logFile -Append -Encoding utf8 } catch { }
 }
 
-# Previously this script suppressed the Stop toast when VS Code was the foreground
-# window ("you're looking at it, you don't need a toast"). In practice users live in
-# VS Code all day, and the suppress branch fired on almost every turn — so they never
-# saw a toast. Removed: toasts now always show.
-
-# Read event context (JSON) from stdin
+# Читаем JSON со stdin
 $stdin = [Console]::In.ReadToEnd()
 $data = $null
 if ($stdin) {
     try { $data = $stdin | ConvertFrom-Json } catch { $data = $null }
 }
 
-# Persist project leaf folder so focus-vscode.ps1 can pick the right window later
+# Имя проекта в %TEMP% — focus-vscode.ps1 ищет по нему окно
 if ($data -and $data.cwd) {
     try {
         $leaf = Split-Path -Leaf ([string]$data.cwd)
@@ -35,54 +28,107 @@ if ($data -and $data.cwd) {
     } catch { }
 }
 
-if ($Event -eq 'Notification') {
-    $title = 'Claude Code: needs your attention'
-    if ($data -and $data.message) {
-        # Plain Notification event (permission_prompt, idle_prompt, etc.)
-        $body = [string]$data.message
-    } elseif ($data -and $data.tool_input -and $data.tool_input.questions -and $data.tool_input.questions.Count -gt 0) {
-        # PreToolUse on AskUserQuestion — surface the first question's text
-        $body = [string]$data.tool_input.questions[0].question
-    } elseif ($data -and $data.tool_input -and $data.tool_input.plan) {
-        # PreToolUse on ExitPlanMode — Claude is asking you to approve a plan
-        $body = 'Claude is proposing a plan — your approval is needed'
-    } else {
-        $body = 'Waiting for your input in VS Code'
+# Дамп последнего JSON каждого типа события — чтобы при необходимости подсмотреть
+# структуру и сузить фильтрацию. Не растёт со временем (Force перезаписывает).
+if ($stdin) {
+    try { $stdin | Out-File -FilePath (Join-Path $env:TEMP "claude-event-$Event-last.json") -Encoding utf8 -Force } catch { }
+}
+
+# Решаем, что показывать — заголовок, тело, и нужно ли показывать вообще.
+$title = $null
+$body  = $null
+
+switch ($Event) {
+    'Stop' {
+        $title = 'Claude Code — закончил ход'
+        $body  = 'Готов к следующей задаче'
     }
-} else {
-    $title = 'Claude Code: turn complete'
-    $body = 'Ready for your next prompt'
+    'Notification' {
+        $title = 'Claude Code — нужно твоё внимание'
+        if ($data -and $data.message) {
+            $body = [string]$data.message
+        } else {
+            $body = 'Жду твоего ответа в VS Code'
+        }
+    }
+    'PreToolUse' {
+        # PreToolUse прилетает на КУЧУ событий (Read/Edit/Write при каждом действии).
+        # Тостов хотим ТОЛЬКО когда Claude реально требует от пользователя реакции:
+        #  - AskUserQuestion: внутренний вопрос
+        #  - ExitPlanMode: апрув плана
+        #  - permission-prompt: tool ждёт одобрения (Bash/PowerShell/любой, не в allowlist)
+        # Всё остальное (auto-approved Read/Edit/Write) — тихо exit.
+        $tool = if ($data) { [string]$data.tool_name } else { '' }
+
+        if ($tool -eq 'AskUserQuestion' -and $data.tool_input.questions -and $data.tool_input.questions.Count -gt 0) {
+            $title = 'Claude Code — вопрос'
+            $body  = [string]$data.tool_input.questions[0].question
+        }
+        elseif ($tool -eq 'ExitPlanMode') {
+            $title = 'Claude Code — нужен апрув плана'
+            $body  = 'Claude предлагает план — твоё подтверждение'
+        }
+        else {
+            # Permission-prompt детектируем по полю permission_decision == 'ask'
+            # (новое API Claude Code; точное имя может отличаться, поэтому пробуем варианты)
+            $needsPermission = $false
+            if ($data) {
+                foreach ($prop in 'permission_decision','permissionDecision','permission_required','permissionRequired') {
+                    if ($data.PSObject.Properties.Name -contains $prop) {
+                        $v = [string]$data.$prop
+                        if ($v -eq 'ask' -or $v -eq 'true' -or $v -eq 'True') { $needsPermission = $true; break }
+                    }
+                }
+            }
+            if ($needsPermission) {
+                $title = "Claude Code — нужно разрешение ($tool)"
+                # Покажем команду/описание (то что Claude хочет выполнить)
+                $desc = ''
+                if ($data.tool_input) {
+                    if ($data.tool_input.description) { $desc = [string]$data.tool_input.description }
+                    elseif ($data.tool_input.command) { $desc = [string]$data.tool_input.command }
+                }
+                $body = if ($desc) { $desc } else { "Tool: $tool" }
+            } else {
+                # Авто-разрешённое действие — тост не нужен
+                Log "skipped: tool=$tool (auto-approved, no toast)"
+                exit 0
+            }
+        }
+    }
+    'PostToolUse' {
+        # На завершение тула тост не нужен — это шум
+        Log "skipped: PostToolUse (no toast for tool completion)"
+        exit 0
+    }
+    default {
+        Log "skipped: unknown event '$Event' (no toast handler)"
+        exit 0
+    }
 }
 
 if ([string]::IsNullOrEmpty($body)) { $body = ' ' }
-# Toast body has length limits
 if ($body.Length -gt 200) { $body = $body.Substring(0, 197) + '...' }
 
 try {
     Import-Module BurntToast -ErrorAction Stop
 
-    # -ActivationType Protocol is the default in BurntToast 1.1.0, but spell it out
-    # so the chain doesn't break if a future version changes the default.
-    $btnOpen = New-BTButton -Content 'Open VS Code' -Arguments 'claude-focus://activate' -ActivationType Protocol
+    $btnOpen = New-BTButton -Content 'Открыть VS Code' -Arguments 'claude-focus://activate' -ActivationType Protocol
     $btnDismiss = New-BTButton -Dismiss
 
     $textTitle = New-BTText -Text $title
-    $textBody = New-BTText -Text $body
+    $textBody  = New-BTText -Text $body
     $binding = New-BTBinding -Children $textTitle, $textBody
-    $visual = New-BTVisual -BindingGeneric $binding
-    $action = New-BTAction -Buttons $btnOpen, $btnDismiss
+    $visual  = New-BTVisual -BindingGeneric $binding
+    $action  = New-BTAction -Buttons $btnOpen, $btnDismiss
 
-    # -Launch + -ActivationType Protocol on the content makes the ENTIRE toast
-    # clickable, not just the button. Critical when the toast has slid into the
-    # Action Center and only the title is visible, or the user mis-clicks past
-    # the small button.
+    # -Launch + -ActivationType Protocol => кликабелен весь тост, не только кнопка
     $content = New-BTContent -Visual $visual -Actions $action `
         -Launch 'claude-focus://activate' -ActivationType Protocol
 
     Submit-BTNotification -Content $content
     Log "submitted: '$title' / '$body'"
 } catch {
-    # Never break the Claude Code session over a failed notification
     Log "FAILED: $($_.Exception.Message)"
     exit 0
 }
