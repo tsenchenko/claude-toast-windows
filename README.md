@@ -17,15 +17,16 @@ Switch to another window while Claude is running and you won't know when it:
 
 ## The solution
 
-This repo wires Claude Code's built-in **hooks** (`Stop` and `Notification` events) into Windows toast notifications. You get a toast in the corner of the screen the moment Claude returns control to you. The Notification toast even shows the actual question text so you know what's pending without switching apps.
+This repo wires Claude Code's built-in **hooks** (`Stop`, `Notification`, and `PermissionRequest` events) into Windows toast notifications. You get a toast in the corner of the screen the moment Claude returns control to you — including when it pops the "Do you want to proceed?" permission dialog. The toast even shows the actual command/question text so you know what's pending without switching apps.
 
 Click "Open VS Code" on the toast to bring the right VS Code window forward (matched by project folder).
 
 ## Features
 
 - Toast on `Stop` event (Claude finishes its turn)
-- Toast on `Notification` event (permission prompts, idle prompts), showing the actual prompt text
-- Toast on `PreToolUse` for `AskUserQuestion` and `ExitPlanMode` — covers in-chat questions and plan-mode approval, which Claude Code does **not** dispatch through the `Notification` event
+- Toast on `PermissionRequest` event — the "Do you want to proceed?" tool-approval dialog (Bash/PowerShell/MCP/etc. not in your allowlist), showing the command Claude wants to run. This is the dedicated event the VS Code extension fires for permission prompts; the broader `Notification` event does **not** reliably cover them
+- Toast on `Notification` event (idle prompts), showing the actual prompt text
+- Toast on `PreToolUse` for `AskUserQuestion` and `ExitPlanMode` — covers in-chat questions and plan-mode approval, which Claude Code does **not** dispatch through the `Notification` or `PermissionRequest` events
 - The question text is surfaced in the toast body, so you know what's being asked without switching apps
 - "Open VS Code" button focuses the correct window — even if you have multiple VS Code windows open, it picks the one running this Claude Code session
 - Toasts always show — including for Stop events. (An earlier version suppressed Stop when VS Code was foreground, but in practice you live in VS Code all day and that branch fired on almost every turn, so you never saw a toast.)
@@ -56,7 +57,7 @@ The installer will:
 3. Copy `notify.sh`, `notify.ps1`, and `focus-vscode.ps1` to `~/.claude/hooks/`
 4. Register the `claude-focus://` URL protocol under `HKCU\Software\Classes\claude-focus`
 5. Set toast banner duration to 60 seconds (`HKCU:\Control Panel\Accessibility\MessageDuration`)
-6. Merge `Stop`, `Notification`, and `PreToolUse` (matched on `AskUserQuestion|ExitPlanMode`) hooks into `~/.claude/settings.json` using the portable command form `"$HOME/.claude/hooks/notify.sh" <Event>`. Existing event entries are preserved.
+6. Merge `Stop`, `Notification`, `PermissionRequest`, and `PreToolUse` (matched on `AskUserQuestion|ExitPlanMode`) hooks into `~/.claude/settings.json` using the portable command form `"$HOME/.claude/hooks/notify.sh" <Event>`. Existing event entries are preserved.
 7. Send a test toast to confirm it works
 
 After install, **restart any open Claude Code session** so it picks up the new hooks (`Ctrl+Shift+P` → `Developer: Reload Window`).
@@ -88,7 +89,7 @@ Set-ItemProperty -Path "HKCU:\Control Panel\Accessibility" -Name MessageDuration
 irm https://raw.githubusercontent.com/tsenchenko/claude-toast-windows/main/uninstall.ps1 | iex
 ```
 
-This removes the hook scripts, unregisters the URL protocol, removes the `Stop` / `Notification` / `PreToolUse` entries from `~/.claude/settings.json` (other event keys like `SessionStart` are preserved), and resets `MessageDuration`. BurntToast and Git for Windows stay installed in case you use them elsewhere — remove BurntToast manually with `Uninstall-Module BurntToast` if you want.
+This removes the hook scripts, unregisters the URL protocol, removes the `Stop` / `Notification` / `PermissionRequest` / `PreToolUse` entries from `~/.claude/settings.json` (other event keys like `SessionStart` are preserved), and resets `MessageDuration`. BurntToast and Git for Windows stay installed in case you use them elsewhere — remove BurntToast manually with `Uninstall-Module BurntToast` if you want.
 
 ## How it works
 
@@ -126,17 +127,19 @@ This removes the hook scripts, unregisters the URL protocol, removes the `Stop` 
 
 ### Components
 
-- **Hooks in `settings.json`** — Claude Code natively supports running shell commands on lifecycle events. We attach to three:
+- **Hooks in `settings.json`** — Claude Code natively supports running shell commands on lifecycle events. We attach to four:
   - `Stop` — turn complete
-  - `Notification` — permission prompts and idle prompts
-  - `PreToolUse` matched on `AskUserQuestion|ExitPlanMode` — fires for in-chat questions and plan-mode approval (these don't go through the `Notification` event in current Claude Code)
+  - `PermissionRequest` — the "Do you want to proceed?" tool-approval dialog (the dedicated event for permission prompts)
+  - `Notification` — idle prompts
+  - `PreToolUse` matched on `AskUserQuestion|ExitPlanMode` — fires for in-chat questions and plan-mode approval (these don't go through `Notification` or `PermissionRequest` in current Claude Code)
 
-  All three use the same portable command `"$HOME/.claude/hooks/notify.sh" <Event>`. On Windows Claude Code dispatches it through Git Bash. [Hook docs.](https://docs.claude.com/en/docs/claude-code/hooks)
+  All four use the same portable command `"$HOME/.claude/hooks/notify.sh" <Event>`. On Windows Claude Code dispatches it through Git Bash. [Hook docs.](https://docs.claude.com/en/docs/claude-code/hooks)
 - **`notify.sh`** — thin bash wrapper. Logs the invocation to `%TEMP%\claude-toast-sh.log` (proves the hook fired), then pipes the event JSON to `notify.ps1`. Same interface as the macOS counterpart, so the `hooks` block in `settings.json` is identical across machines.
 - **`notify.ps1`** — receives event JSON on stdin and renders the toast through BurntToast. Per-event behavior:
   - `Stop` — hardcoded "turn complete" toast
+  - `PermissionRequest` — shows the tool name and the command/description Claude is asking to run (`tool_input.command` / `description` / `file_path`)
   - `Notification` — uses the `message` field from the event JSON
-  - `PreToolUse` — toasts only when there's something to react to: `AskUserQuestion` (shows the question text), `ExitPlanMode` (plan approval), or a permission-prompt (detected via a `permission_decision` / `permissionRequired` field on the event). Auto-approved tool calls (Read/Edit/Write on allow-listed files) are silently skipped to avoid spam.
+  - `PreToolUse` — toasts only for `AskUserQuestion` (shows the question text) and `ExitPlanMode` (plan approval). Everything else (auto-approved Read/Edit/Write) is silently skipped to avoid spam.
   - `PostToolUse` — silently skipped (tool completion is not a toast-worthy moment)
   - Logs every decision to `%TEMP%\claude-toast.log`. Also writes the last raw JSON of each event type to `%TEMP%\claude-event-<Event>-last.json` for debugging when Claude Code changes its event schema.
 - **`focus-vscode.ps1`** — invoked when the toast button is clicked. Reads the project folder name (saved by `notify.ps1`) and matches it against `MainWindowTitle` of running `Code.exe` processes to pick the right window, then brings it forward via Win32 API. Uses `AttachThreadInput` + `AllowSetForegroundWindow` to bypass UIPI — Action Center launches the protocol handler without foreground rights, so a plain `SetForegroundWindow` silently fails.

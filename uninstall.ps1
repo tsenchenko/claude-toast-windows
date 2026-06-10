@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Reverses what install.ps1 did: removes the hook scripts, unregisters the
-    claude-focus:// URL protocol, removes the Stop/Notification/PreToolUse
+    claude-focus:// URL protocol, removes the Stop/Notification/PermissionRequest/PreToolUse
     entries from ~/.claude/settings.json (other event keys like SessionStart
     are preserved), and resets the Windows MessageDuration setting.
 
@@ -62,7 +62,7 @@ if (Test-Path $settingsPath) {
         if ($raw.Trim()) {
             $settings = $raw | ConvertFrom-Json
             if ($settings.PSObject.Properties.Name -contains 'hooks') {
-                $ours = @('Stop','Notification','PreToolUse')
+                $ours = @('Stop','Notification','PermissionRequest','PreToolUse')
                 $removed = @()
                 foreach ($k in $ours) {
                     if ($settings.hooks.PSObject.Properties.Name -contains $k) {

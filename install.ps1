@@ -3,8 +3,8 @@
     Installs Claude Code toast notifications for Windows.
 
 .DESCRIPTION
-    Sets up Claude Code hooks (Stop, Notification, PreToolUse) to fire Windows
-    toast notifications. Installs the BurntToast PowerShell module, copies the
+    Sets up Claude Code hooks (Stop, Notification, PermissionRequest, PreToolUse)
+    to fire Windows toast notifications. Installs the BurntToast PowerShell module, copies the
     hook scripts to ~/.claude/hooks/, registers a custom URL protocol for the
     "Open VS Code" toast button, and merges the hooks block into
     ~/.claude/settings.json without overwriting existing keys.
@@ -127,8 +127,10 @@ if (-not $settings) {
     $settings = New-Object PSCustomObject
 }
 
-$notifyCmd = '"$HOME/.claude/hooks/notify.sh" Notification'
-$stopCmd   = '"$HOME/.claude/hooks/notify.sh" Stop'
+$notifyCmd  = '"$HOME/.claude/hooks/notify.sh" Notification'
+$stopCmd    = '"$HOME/.claude/hooks/notify.sh" Stop'
+$permCmd    = '"$HOME/.claude/hooks/notify.sh" PermissionRequest'
+$preToolCmd = '"$HOME/.claude/hooks/notify.sh" PreToolUse'
 
 $hooksBlock = [PSCustomObject]@{
     Stop = @(
@@ -143,20 +145,29 @@ $hooksBlock = [PSCustomObject]@{
             hooks   = @( [PSCustomObject]@{ type = 'command'; command = $notifyCmd } )
         }
     )
-    # PreToolUse fires for in-chat questions (AskUserQuestion) and plan-mode approval
-    # (ExitPlanMode). The Notification event does NOT cover these in current Claude Code,
-    # so we hook PreToolUse and dispatch the same notify.sh with the Notification event.
+    # PermissionRequest is the dedicated event for the "Do you want to proceed?"
+    # tool-approval dialog (Bash/PowerShell/MCP/etc not in the allowlist). This is
+    # what actually fires when a permission prompt appears — the Notification event
+    # does NOT cover it in the VS Code extension. Empty matcher = all tools.
+    PermissionRequest = @(
+        [PSCustomObject]@{
+            matcher = ''
+            hooks   = @( [PSCustomObject]@{ type = 'command'; command = $permCmd } )
+        }
+    )
+    # PreToolUse covers in-chat questions (AskUserQuestion) and plan-mode approval
+    # (ExitPlanMode) — these don't go through Notification or PermissionRequest.
     PreToolUse = @(
         [PSCustomObject]@{
             matcher = 'AskUserQuestion|ExitPlanMode'
-            hooks   = @( [PSCustomObject]@{ type = 'command'; command = $notifyCmd } )
+            hooks   = @( [PSCustomObject]@{ type = 'command'; command = $preToolCmd } )
         }
     )
 }
 
 if ($settings.PSObject.Properties.Name -contains 'hooks') {
     # Merge: preserve any existing event keys we don't manage (e.g. SessionStart).
-    foreach ($k in 'Stop','Notification','PreToolUse') {
+    foreach ($k in 'Stop','Notification','PermissionRequest','PreToolUse') {
         if ($settings.hooks.PSObject.Properties.Name -contains $k) {
             $settings.hooks.$k = $hooksBlock.$k
         } else {

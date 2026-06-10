@@ -51,13 +51,27 @@ switch ($Event) {
             $body = 'Жду твоего ответа в VS Code'
         }
     }
+    'PermissionRequest' {
+        # Выделенное событие Claude Code: появился диалог "Do you want to proceed?"
+        # (Bash/PowerShell/MCP/любой tool не из allowlist). Это ровно то, что
+        # пользователь видит на экране. Раньше сюда тост не доходил: проект слушал
+        # только Notification (его VS Code-расширение для permission-промптов не шлёт)
+        # и мёртвый детект permission-поля в PreToolUse (такого поля на входе нет).
+        $tool = if ($data) { [string]$data.tool_name } else { '' }
+        $title = if ($tool) { "Claude Code — нужно разрешение ($tool)" } else { 'Claude Code — нужно разрешение' }
+        # Покажем команду/описание/путь — то, что Claude хочет выполнить
+        $desc = ''
+        if ($data -and $data.tool_input) {
+            if ($data.tool_input.description) { $desc = [string]$data.tool_input.description }
+            elseif ($data.tool_input.command) { $desc = [string]$data.tool_input.command }
+            elseif ($data.tool_input.file_path) { $desc = [string]$data.tool_input.file_path }
+        }
+        $body = if ($desc) { $desc } else { "Tool: $tool" }
+    }
     'PreToolUse' {
-        # PreToolUse прилетает на КУЧУ событий (Read/Edit/Write при каждом действии).
-        # Тостов хотим ТОЛЬКО когда Claude реально требует от пользователя реакции:
-        #  - AskUserQuestion: внутренний вопрос
-        #  - ExitPlanMode: апрув плана
-        #  - permission-prompt: tool ждёт одобрения (Bash/PowerShell/любой, не в allowlist)
-        # Всё остальное (auto-approved Read/Edit/Write) — тихо exit.
+        # PreToolUse прилетает на КУЧУ событий. Тост нужен только для двух tool'ов,
+        # которые НЕ идут через PermissionRequest: AskUserQuestion (вопрос в чате) и
+        # ExitPlanMode (апрув плана). Сами permission-промпты ловит PermissionRequest.
         $tool = if ($data) { [string]$data.tool_name } else { '' }
 
         if ($tool -eq 'AskUserQuestion' -and $data.tool_input.questions -and $data.tool_input.questions.Count -gt 0) {
@@ -69,31 +83,9 @@ switch ($Event) {
             $body  = 'Claude предлагает план — твоё подтверждение'
         }
         else {
-            # Permission-prompt детектируем по полю permission_decision == 'ask'
-            # (новое API Claude Code; точное имя может отличаться, поэтому пробуем варианты)
-            $needsPermission = $false
-            if ($data) {
-                foreach ($prop in 'permission_decision','permissionDecision','permission_required','permissionRequired') {
-                    if ($data.PSObject.Properties.Name -contains $prop) {
-                        $v = [string]$data.$prop
-                        if ($v -eq 'ask' -or $v -eq 'true' -or $v -eq 'True') { $needsPermission = $true; break }
-                    }
-                }
-            }
-            if ($needsPermission) {
-                $title = "Claude Code — нужно разрешение ($tool)"
-                # Покажем команду/описание (то что Claude хочет выполнить)
-                $desc = ''
-                if ($data.tool_input) {
-                    if ($data.tool_input.description) { $desc = [string]$data.tool_input.description }
-                    elseif ($data.tool_input.command) { $desc = [string]$data.tool_input.command }
-                }
-                $body = if ($desc) { $desc } else { "Tool: $tool" }
-            } else {
-                # Авто-разрешённое действие — тост не нужен
-                Log "skipped: tool=$tool (auto-approved, no toast)"
-                exit 0
-            }
+            # Авто-разрешённое действие (Read/Edit/Write и т.п.) — тост не нужен
+            Log "skipped: tool=$tool (no toast for this PreToolUse)"
+            exit 0
         }
     }
     'PostToolUse' {
