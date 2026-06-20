@@ -34,6 +34,46 @@ if ($stdin) {
     try { $stdin | Out-File -FilePath (Join-Path $env:TEMP "claude-event-$Event-last.json") -Encoding utf8 -Force } catch { }
 }
 
+# Глушим тост, если на переднем плане ИМЕННО окно VS Code этого проекта — ты на него
+# смотришь, ответ/вопрос/диалог и так перед глазами. В других окнах VS Code, браузере
+# и т.п. тост показываем. Сопоставление — то же, что в focus-vscode.ps1: имя папки
+# проекта это отдельный сегмент заголовка "файл - ПАПКА - Visual Studio Code".
+# Подстроку НЕ используем — лучше лишний тост, чем пропущенный. Совпадение требует
+# и процесс 'Code', и точный сегмент заголовка.
+# Override для отладки/«показывать всегда»: $env:CLAUDE_TOAST_ALWAYS=1
+if ($leaf -and -not $env:CLAUDE_TOAST_ALWAYS) {
+    try {
+        Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class FgWin {
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);
+}
+"@ -ErrorAction Stop
+
+        $fg = [FgWin]::GetForegroundWindow()
+        $fgPid = 0
+        [FgWin]::GetWindowThreadProcessId($fg, [ref]$fgPid) | Out-Null
+        $proc = if ($fgPid -ne 0) { Get-Process -Id $fgPid -ErrorAction SilentlyContinue } else { $null }
+
+        if ($proc -and $proc.ProcessName -eq 'Code') {
+            $len = [FgWin]::GetWindowTextLength($fg)
+            $sb = New-Object System.Text.StringBuilder ($len + 1)
+            [FgWin]::GetWindowText($fg, $sb, $sb.Capacity) | Out-Null
+            $fgTitle = $sb.ToString()
+
+            if (($fgTitle -split ' - ') -contains $leaf) {
+                Log "suppressed: project window '$leaf' is foreground (title='$fgTitle')"
+                exit 0
+            }
+        }
+    } catch { Log "foreground check failed: $($_.Exception.Message)" }
+}
+
 # Решаем, что показывать — заголовок, тело, и нужно ли показывать вообще.
 $title = $null
 $body  = $null

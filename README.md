@@ -29,7 +29,7 @@ Click "Open VS Code" on the toast to bring the right VS Code window forward (mat
 - Toast on `PreToolUse` for `AskUserQuestion` and `ExitPlanMode` — covers in-chat questions and plan-mode approval, which Claude Code does **not** dispatch through the `Notification` or `PermissionRequest` events
 - The question text is surfaced in the toast body, so you know what's being asked without switching apps
 - "Open VS Code" button focuses the correct window — even if you have multiple VS Code windows open, it picks the one running this Claude Code session
-- Toasts always show — including for Stop events. (An earlier version suppressed Stop when VS Code was foreground, but in practice you live in VS Code all day and that branch fired on almost every turn, so you never saw a toast.)
+- Toasts are suppressed only when **this project's own VS Code window is the foreground window** — you're already looking at it, so a toast would be redundant. Any other window (a different VS Code project, a browser, etc.) still gets the toast. Matching is by the exact title segment (`… - <project folder> - Visual Studio Code`), the same way `focus-vscode.ps1` picks a window; a substring is deliberately not enough, so a missed toast is avoided. An older version suppressed on *any* VS Code window being foreground, which fired on nearly every turn and hid almost all toasts — this narrow check fixes that. Override with `$env:CLAUDE_TOAST_ALWAYS=1` to always show.
 - Toasts auto-dismiss after 60 seconds (configurable via `MessageDuration`)
 - Per-user install — no admin rights needed
 - Lives in `~/.claude/settings.local.json` so it doesn't interfere with anything synced via `~/.claude/settings.json`
@@ -71,7 +71,7 @@ The hook command (`"$HOME/.claude/hooks/notify.sh" <Event>`) is intentionally po
 The toast itself is rendered in `~/.claude/hooks/notify.ps1` (PowerShell + BurntToast). `notify.sh` is a thin bash wrapper that forwards the event to it. Common tweaks all live in `notify.ps1`:
 
 - **Change the text** — find the `$title` and `$body` lines and rewrite
-- **Re-add a foreground-window check** (skip the toast when VS Code is focused) — wrap the body in a `GetForegroundWindow` + process-name check; see git history for the old block
+- **Toggle the focused-window suppression** — the `if ($leaf -and -not $env:CLAUDE_TOAST_ALWAYS)` block (a `GetForegroundWindow` + process-name + title-segment check) skips the toast when this project's VS Code window is foreground. Delete the block to always toast, or set `$env:CLAUDE_TOAST_ALWAYS=1` to disable it without editing
 - **Change the buttons** — see [BurntToast docs](https://github.com/Windos/BurntToast#new-btbutton)
 
 Both scripts are read fresh on every event, so no reinstall is needed after edits.
