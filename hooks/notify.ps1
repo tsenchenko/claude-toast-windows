@@ -3,7 +3,7 @@
     [string]$Event
 )
 
-# stdin как UTF-8 (Claude Code шлёт JSON в UTF-8, PS 5.1 без этого ломает кириллицу)
+# Read stdin as UTF-8 (Claude Code sends UTF-8 JSON; without this PS 5.1 mangles Cyrillic)
 try { [Console]::InputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 
 $logFile = Join-Path $env:TEMP 'claude-toast.log'
@@ -11,7 +11,7 @@ function Log { param([string]$Msg)
     try { "$([DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss')) [$Event] $Msg" | Out-File -FilePath $logFile -Append -Encoding utf8 } catch { }
 }
 
-# Читаем JSON со stdin
+# Read the event JSON from stdin
 $stdin = [Console]::In.ReadToEnd()
 $data = $null
 if ($stdin) {
@@ -30,19 +30,20 @@ if ($data -and $data.cwd) {
     } catch { }
 }
 
-# Дамп последнего JSON каждого типа события — чтобы при необходимости подсмотреть
-# структуру и сузить фильтрацию. Не растёт со временем (Force перезаписывает).
+# Dump the last JSON of each event type — to inspect the schema and narrow
+# filtering when needed. Does not grow over time (Force overwrites).
 if ($stdin) {
     try { $stdin | Out-File -FilePath (Join-Path $env:TEMP "claude-event-$Event-last.json") -Encoding utf8 -Force } catch { }
 }
 
-# Глушим тост, если на переднем плане ИМЕННО окно VS Code этого проекта — ты на него
-# смотришь, ответ/вопрос/диалог и так перед глазами. В других окнах VS Code, браузере
-# и т.п. тост показываем. Сопоставление — то же, что в focus-vscode.ps1: имя папки
-# проекта это отдельный сегмент заголовка "файл - ПАПКА - Visual Studio Code".
-# Подстроку НЕ используем — лучше лишний тост, чем пропущенный. Совпадение требует
-# и процесс 'Code', и точный сегмент заголовка.
-# Override для отладки/«показывать всегда»: $env:CLAUDE_TOAST_ALWAYS=1
+# Suppress the toast if the foreground window is THIS project's VS Code window —
+# the user is looking at it, so the answer/question/dialog is already on screen.
+# In other VS Code windows, the browser, etc. the toast IS shown. Matching is the
+# same as in focus-vscode.ps1: the project folder name is a separate segment of
+# the "file - FOLDER - Visual Studio Code" title. NO substring matching — a
+# redundant toast beats a missed one. A match requires both the 'Code' process
+# and the exact title segment.
+# Debug/"always show" override: $env:CLAUDE_TOAST_ALWAYS=1
 if ($leaf -and -not $env:CLAUDE_TOAST_ALWAYS) {
     try {
         Add-Type @"
@@ -77,11 +78,12 @@ public class FgWin {
 }
 
 # Tag every toast with its project. With several concurrent sessions an
-# unlabeled "закончил ход" from a background project looks like the ACTIVE
+# unlabeled Stop toast from a background project looks like the ACTIVE
 # session toasting mid-work for no reason.
 $projTag = if ($leaf) { " [$leaf]" } else { '' }
 
-# Решаем, что показывать — заголовок, тело, и нужно ли показывать вообще.
+# Decide what to show — title, body, and whether to show anything at all.
+# Toast strings are user-facing UI and stay in Russian by design.
 $title = $null
 $body  = $null
 
@@ -99,11 +101,12 @@ switch ($Event) {
         }
     }
     'PermissionRequest' {
-        # Выделенное событие Claude Code: появился диалог "Do you want to proceed?"
-        # (Bash/PowerShell/MCP/любой tool не из allowlist). Это ровно то, что
-        # пользователь видит на экране. Раньше сюда тост не доходил: проект слушал
-        # только Notification (его VS Code-расширение для permission-промптов не шлёт)
-        # и мёртвый детект permission-поля в PreToolUse (такого поля на входе нет).
+        # Claude Code's dedicated event: a "Do you want to proceed?" dialog appeared
+        # (Bash/PowerShell/MCP/any tool not on the allowlist). This is exactly what
+        # the user sees on screen. Historically no toast reached here: the project
+        # listened only to Notification (which the VS Code extension does not send
+        # for permission prompts) and to a dead permission-field check in PreToolUse
+        # (no such field exists in that payload).
         $tool = if ($data) { [string]$data.tool_name } else { '' }
         # AskUserQuestion/ExitPlanMode also arrive as PermissionRequest, but the
         # PreToolUse handler already toasts them (with the actual question/plan
@@ -113,7 +116,7 @@ switch ($Event) {
             exit 0
         }
         $title = if ($tool) { "Claude Code$projTag — нужно разрешение ($tool)" } else { "Claude Code$projTag — нужно разрешение" }
-        # Покажем команду/описание/путь — то, что Claude хочет выполнить
+        # Show the command/description/path — whatever Claude wants to run
         $desc = ''
         if ($data -and $data.tool_input) {
             if ($data.tool_input.description) { $desc = [string]$data.tool_input.description }
@@ -123,9 +126,10 @@ switch ($Event) {
         $body = if ($desc) { $desc } else { "Tool: $tool" }
     }
     'PreToolUse' {
-        # PreToolUse прилетает на КУЧУ событий. Тост нужен только для двух tool'ов,
-        # которые НЕ идут через PermissionRequest: AskUserQuestion (вопрос в чате) и
-        # ExitPlanMode (апрув плана). Сами permission-промпты ловит PermissionRequest.
+        # PreToolUse fires for a TON of events. A toast is only needed for the two
+        # tools the user must react to in chat: AskUserQuestion (in-chat question)
+        # and ExitPlanMode (plan approval). Permission prompts themselves are
+        # handled by PermissionRequest (which skips these two as duplicates).
         $tool = if ($data) { [string]$data.tool_name } else { '' }
 
         if ($tool -eq 'AskUserQuestion' -and $data.tool_input.questions -and $data.tool_input.questions.Count -gt 0) {
@@ -137,13 +141,13 @@ switch ($Event) {
             $body  = 'Claude предлагает план — твоё подтверждение'
         }
         else {
-            # Авто-разрешённое действие (Read/Edit/Write и т.п.) — тост не нужен
+            # Auto-approved action (Read/Edit/Write etc.) — no toast needed
             Log "skipped: tool=$tool (no toast for this PreToolUse)"
             exit 0
         }
     }
     'PostToolUse' {
-        # На завершение тула тост не нужен — это шум
+        # No toast for tool completion — that's noise
         Log "skipped: PostToolUse (no toast for tool completion)"
         exit 0
     }
@@ -174,7 +178,7 @@ try {
     $visual  = New-BTVisual -BindingGeneric $binding
     $action  = New-BTAction -Buttons $btnOpen, $btnDismiss
 
-    # -Launch + -ActivationType Protocol => кликабелен весь тост, не только кнопка
+    # -Launch + -ActivationType Protocol => the whole toast is clickable, not just the button
     $content = New-BTContent -Visual $visual -Actions $action `
         -Launch $launchUrl -ActivationType Protocol
 
