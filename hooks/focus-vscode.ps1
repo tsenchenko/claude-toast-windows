@@ -11,6 +11,16 @@ $target = ''
 if (Test-Path $targetFile) {
     try { $target = (Get-Content -Path $targetFile -Raw -Encoding UTF8 -ErrorAction Stop).Trim() } catch { $target = '' }
 }
+
+# Prefer the project embedded in the click URL (claude-focus://activate/<leaf>).
+# The temp file above is a SHARED fallback: with concurrent sessions any of them
+# may overwrite it, so the URL is the only per-toast-accurate source.
+if ($args.Count -ge 1 -and "$($args[0])" -match '^claude-focus://activate/(.+)$') {
+    try {
+        $urlLeaf = [Uri]::UnescapeDataString($Matches[1].TrimEnd('/'))
+        if ($urlLeaf) { $target = $urlLeaf }
+    } catch { }
+}
 Log "invoked. target='$target' args=$($args -join '|')"
 
 # Win32: enumerate ALL top-level windows (EnumWindows) + focus one, bypassing UIPI.

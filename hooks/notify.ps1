@@ -18,7 +18,9 @@ if ($stdin) {
     try { $data = $stdin | ConvertFrom-Json } catch { $data = $null }
 }
 
-# Имя проекта в %TEMP% — focus-vscode.ps1 ищет по нему окно
+# Project leaf name: goes into the toast title, into the click URL, and into
+# %TEMP% as a fallback for focus-vscode.ps1 window lookup.
+$leaf = ''
 if ($data -and $data.cwd) {
     try {
         $leaf = Split-Path -Leaf ([string]$data.cwd)
@@ -74,17 +76,22 @@ public class FgWin {
     } catch { Log "foreground check failed: $($_.Exception.Message)" }
 }
 
+# Tag every toast with its project. With several concurrent sessions an
+# unlabeled "закончил ход" from a background project looks like the ACTIVE
+# session toasting mid-work for no reason.
+$projTag = if ($leaf) { " [$leaf]" } else { '' }
+
 # Решаем, что показывать — заголовок, тело, и нужно ли показывать вообще.
 $title = $null
 $body  = $null
 
 switch ($Event) {
     'Stop' {
-        $title = 'Claude Code — закончил ход'
+        $title = "Claude Code$projTag — закончил ход"
         $body  = 'Готов к следующей задаче'
     }
     'Notification' {
-        $title = 'Claude Code — нужно твоё внимание'
+        $title = "Claude Code$projTag — нужно твоё внимание"
         if ($data -and $data.message) {
             $body = [string]$data.message
         } else {
@@ -98,7 +105,14 @@ switch ($Event) {
         # только Notification (его VS Code-расширение для permission-промптов не шлёт)
         # и мёртвый детект permission-поля в PreToolUse (такого поля на входе нет).
         $tool = if ($data) { [string]$data.tool_name } else { '' }
-        $title = if ($tool) { "Claude Code — нужно разрешение ($tool)" } else { 'Claude Code — нужно разрешение' }
+        # AskUserQuestion/ExitPlanMode also arrive as PermissionRequest, but the
+        # PreToolUse handler already toasts them (with the actual question/plan
+        # text) 1-2s earlier — skip the duplicate.
+        if ($tool -eq 'AskUserQuestion' -or $tool -eq 'ExitPlanMode') {
+            Log "skipped: tool=$tool (PreToolUse already toasts it)"
+            exit 0
+        }
+        $title = if ($tool) { "Claude Code$projTag — нужно разрешение ($tool)" } else { "Claude Code$projTag — нужно разрешение" }
         # Покажем команду/описание/путь — то, что Claude хочет выполнить
         $desc = ''
         if ($data -and $data.tool_input) {
@@ -115,11 +129,11 @@ switch ($Event) {
         $tool = if ($data) { [string]$data.tool_name } else { '' }
 
         if ($tool -eq 'AskUserQuestion' -and $data.tool_input.questions -and $data.tool_input.questions.Count -gt 0) {
-            $title = 'Claude Code — вопрос'
+            $title = "Claude Code$projTag — вопрос"
             $body  = [string]$data.tool_input.questions[0].question
         }
         elseif ($tool -eq 'ExitPlanMode') {
-            $title = 'Claude Code — нужен апрув плана'
+            $title = "Claude Code$projTag — нужен апрув плана"
             $body  = 'Claude предлагает план — твоё подтверждение'
         }
         else {
@@ -142,10 +156,16 @@ switch ($Event) {
 if ([string]::IsNullOrEmpty($body)) { $body = ' ' }
 if ($body.Length -gt 200) { $body = $body.Substring(0, 197) + '...' }
 
+# Click target: embed the project in the URL so focus-vscode.ps1 focuses THIS
+# toast's project. The shared %TEMP% target file races between concurrent
+# sessions (kept only as a fallback for URLs without a leaf).
+$launchUrl = 'claude-focus://activate'
+if ($leaf) { $launchUrl = "claude-focus://activate/$([Uri]::EscapeDataString($leaf))" }
+
 try {
     Import-Module BurntToast -ErrorAction Stop
 
-    $btnOpen = New-BTButton -Content 'Открыть VS Code' -Arguments 'claude-focus://activate' -ActivationType Protocol
+    $btnOpen = New-BTButton -Content 'Открыть VS Code' -Arguments $launchUrl -ActivationType Protocol
     $btnDismiss = New-BTButton -Dismiss
 
     $textTitle = New-BTText -Text $title
@@ -156,7 +176,7 @@ try {
 
     # -Launch + -ActivationType Protocol => кликабелен весь тост, не только кнопка
     $content = New-BTContent -Visual $visual -Actions $action `
-        -Launch 'claude-focus://activate' -ActivationType Protocol
+        -Launch $launchUrl -ActivationType Protocol
 
     Submit-BTNotification -Content $content
     Log "submitted: '$title' / '$body'"
