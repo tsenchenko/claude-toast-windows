@@ -147,7 +147,7 @@ $hooksBlock = [PSCustomObject]@{
     )
     # PermissionRequest is the dedicated event for the "Do you want to proceed?"
     # tool-approval dialog (Bash/PowerShell/MCP/etc not in the allowlist). This is
-    # what actually fires when a permission prompt appears — the Notification event
+    # what actually fires when a permission prompt appears - the Notification event
     # does NOT cover it in the VS Code extension. Empty matcher = all tools.
     PermissionRequest = @(
         [PSCustomObject]@{
@@ -156,7 +156,7 @@ $hooksBlock = [PSCustomObject]@{
         }
     )
     # PreToolUse covers in-chat questions (AskUserQuestion) and plan-mode approval
-    # (ExitPlanMode) — these don't go through Notification or PermissionRequest.
+    # (ExitPlanMode) - these don't go through Notification or PermissionRequest.
     PreToolUse = @(
         [PSCustomObject]@{
             matcher = 'AskUserQuestion|ExitPlanMode'
@@ -167,7 +167,7 @@ $hooksBlock = [PSCustomObject]@{
 
 # --- begin hook merge (kept self-contained; uninstall.ps1 has the same helpers) ---
 # Surgical merge: within each event only OUR hook entries (notify.sh / legacy
-# notify.ps1 commands) are replaced — never whole event arrays or whole groups.
+# notify.ps1 commands) are replaced - never whole event arrays or whole groups.
 # A group can also hold someone else's command (e.g. a second Stop hook), and
 # other entries on the same event (e.g. a PreToolUse cost gate) must survive.
 # Re-running is idempotent. Our PostToolUse entry, which some shared setups

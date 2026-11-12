@@ -33,6 +33,10 @@ Newest first. Dates are commit dates.
   drops a leftover `notify.sh` `PostToolUse` entry. Verified under Windows
   PowerShell 5.1 against a real shared `settings.json`: idempotent, other hooks
   kept.
+- **Fixed: running `uninstall.ps1` from a file failed in Windows PowerShell 5.1.**
+  The file has no BOM, so 5.1 read it as ANSI and an em-dash inside a string
+  turned into a closing quote (parse error). The `irm … | iex` path was not
+  affected. `install.ps1` and `uninstall.ps1` are now ASCII-only.
 - **Logs rotate at 1 MB** (`claude-toast.log`, `claude-toast-sh.log` → `.old`,
   one generation kept). They used to grow without limit.
 - **No toasts from background (headless) sessions.** `claude -p` runs (orchestrator

@@ -18,7 +18,7 @@ function Write-Step { param([string]$Message) Write-Host "==> $Message" -Foregro
 function Write-Ok   { param([string]$Message) Write-Host "    $Message" -ForegroundColor Green }
 
 Write-Host ""
-Write-Host "Claude Code Toast Notifications — uninstaller" -ForegroundColor Magenta
+Write-Host "Claude Code Toast Notifications - uninstaller" -ForegroundColor Magenta
 Write-Host ""
 
 # 1. Hook scripts
@@ -42,7 +42,7 @@ if (Test-Path $key) {
     Write-Ok "Protocol removed"
 }
 
-# 3. MessageDuration — delete the override (Windows reverts to default 5s)
+# 3. MessageDuration - delete the override (Windows reverts to default 5s)
 Write-Step "Resetting Windows toast duration"
 $accPath = "HKCU:\Control Panel\Accessibility"
 if (Test-Path $accPath) {
@@ -53,7 +53,7 @@ if (Test-Path $accPath) {
 }
 
 # 4. Remove only the events we own from settings.json. We do NOT delete the whole
-# hooks block — the user may have other event types in there (e.g. SessionStart).
+# hooks block - the user may have other event types in there (e.g. SessionStart).
 Write-Step "Cleaning settings.json"
 $settingsPath = Join-Path $HOME '.claude\settings.json'
 if (Test-Path $settingsPath) {
@@ -106,7 +106,7 @@ if (Test-Path $settingsPath) {
             }
         }
     } catch {
-        Write-Host "    Could not parse settings.json — leaving it alone." -ForegroundColor Yellow
+        Write-Host "    Could not parse settings.json - leaving it alone." -ForegroundColor Yellow
     }
 }
 
