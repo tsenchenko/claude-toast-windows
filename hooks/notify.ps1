@@ -20,10 +20,16 @@ if ($stdin) {
 
 # Project leaf name: goes into the toast title, into the click URL, and into
 # %TEMP% as a fallback for focus-vscode.ps1 window lookup.
+# Source: CLAUDE_PROJECT_DIR (the session's root folder, set by Claude Code for
+# hooks) — NOT the payload's cwd. cwd follows every `cd` the session makes, so
+# after `cd tools` the leaf became 'tools', never matched the VS Code window
+# title, and the foreground suppression silently stopped working. cwd is kept
+# only as a fallback for Claude Code builds that don't set the variable.
 $leaf = ''
-if ($data -and $data.cwd) {
+$projDir = if ($env:CLAUDE_PROJECT_DIR) { [string]$env:CLAUDE_PROJECT_DIR } elseif ($data -and $data.cwd) { [string]$data.cwd } else { '' }
+if ($projDir) {
     try {
-        $leaf = Split-Path -Leaf ([string]$data.cwd)
+        $leaf = Split-Path -Leaf ($projDir.TrimEnd('\', '/'))
         if ($leaf) {
             $leaf | Out-File -FilePath (Join-Path $env:TEMP 'claude-focus-target.txt') -Encoding utf8 -Force
         }
@@ -155,6 +161,55 @@ switch ($Event) {
         Log "skipped: unknown event '$Event' (no toast handler)"
         exit 0
     }
+}
+
+# Background (headless) sessions get no toast. `claude -p` runs — orchestrator
+# workers, scripted runs — have nobody watching them: the interactive session
+# that launched them reports their results, so their Stop toasts are pure noise.
+# Detection: find the Claude process that fired the hook and check its command
+# line for -p/--print. Interactive VS Code sessions run as
+# `claude.exe --input-format stream-json ...` (parent Code.exe) with no -p.
+#   1. Primary: Claude Code's session registry (<config>\sessions\<pid>.json)
+#      maps the payload's session_id to the process PID. Its "kind" field is
+#      NOT usable — workers inherit the parent's env and report "interactive" —
+#      so only the PID is taken from it.
+#   2. Fallback: walk up the process tree. Unreliable on its own: Git Bash
+#      (MSYS) exec can leave a dead parent PID in the chain, ending the walk
+#      before it reaches claude.exe.
+# Runs only for events that are about to toast, so Read/Edit noise pays nothing.
+function Test-IsClaudeProcess { param($p)
+    $p -and ($p.Name -eq 'claude.exe' -or ($p.Name -eq 'node.exe' -and [string]$p.CommandLine -match '@anthropic-ai[\\/]claude-code'))
+}
+function Test-HeadlessCommandLine { param($p) [string]$p.CommandLine -match '(^|\s)(-p|--print)(\s|$)' }
+
+function Test-HeadlessSession {
+    param([string]$SessionId, [int]$StartPid = $PID)
+    try {
+        if ($SessionId) {
+            $cfgDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
+            $hits = Select-String -Path (Join-Path $cfgDir 'sessions\*.json') -SimpleMatch "`"$SessionId`"" -List -ErrorAction SilentlyContinue
+            foreach ($h in $hits) {
+                $reg = Get-Content -Raw -Encoding UTF8 $h.Path | ConvertFrom-Json
+                if ($reg.sessionId -ne $SessionId -or -not $reg.pid) { continue }
+                $p = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$reg.pid)" -ErrorAction SilentlyContinue
+                if (Test-IsClaudeProcess $p) { return (Test-HeadlessCommandLine $p) }
+            }
+        }
+        $procId = $StartPid
+        for ($i = 0; $i -lt 12 -and $procId -gt 0; $i++) {
+            $p = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction Stop
+            if (-not $p) { break }
+            if (Test-IsClaudeProcess $p) { return (Test-HeadlessCommandLine $p) }
+            $procId = [int]$p.ParentProcessId
+        }
+    } catch { Log "headless check failed: $($_.Exception.Message)" }
+    return $false
+}
+
+$sessionId = if ($data) { [string]$data.session_id } else { '' }
+if (-not $env:CLAUDE_TOAST_ALWAYS -and (Test-HeadlessSession -SessionId $sessionId)) {
+    Log "skipped: headless session (claude -p) — '$title'"
+    exit 0
 }
 
 if ([string]::IsNullOrEmpty($body)) { $body = ' ' }

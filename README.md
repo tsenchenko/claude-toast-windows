@@ -29,7 +29,8 @@ Click "Open VS Code" on the toast to bring the right VS Code window forward (mat
 - Toast on `PreToolUse` for `AskUserQuestion` and `ExitPlanMode` — covers in-chat questions and plan-mode approval, which Claude Code does **not** dispatch through the `Notification` or `PermissionRequest` events
 - The question text is surfaced in the toast body, so you know what's being asked without switching apps
 - "Open VS Code" button focuses the correct window — even if you have multiple VS Code windows open, it picks the one running this Claude Code session
-- Toasts are suppressed only when **this project's own VS Code window is the foreground window** — you're already looking at it, so a toast would be redundant. Any other window (a different VS Code project, a browser, etc.) still gets the toast. Matching is by the exact title segment (`… - <project folder> - Visual Studio Code`), the same way `focus-vscode.ps1` picks a window; a substring is deliberately not enough, so a missed toast is avoided. An older version suppressed on *any* VS Code window being foreground, which fired on nearly every turn and hid almost all toasts — this narrow check fixes that. Override with `$env:CLAUDE_TOAST_ALWAYS=1` to always show.
+- Toasts are suppressed only when **this project's own VS Code window is the foreground window** — you're already looking at it, so a toast would be redundant. Any other window (a different VS Code project, a browser, etc.) still gets the toast. Matching is by the exact title segment (`… - <project folder> - Visual Studio Code`), the same way `focus-vscode.ps1` picks a window; a substring is deliberately not enough, so a missed toast is avoided. An older version suppressed on *any* VS Code window being foreground, which fired on nearly every turn and hid almost all toasts — this narrow check fixes that. The project folder comes from `CLAUDE_PROJECT_DIR` (the session's root, set by Claude Code for hooks), not from the event's `cwd` — `cwd` follows every `cd` the session makes, so after `cd tools` it named a folder no window title contains and the suppression silently stopped working. Override with `$env:CLAUDE_TOAST_ALWAYS=1` to always show.
+- **No toasts from background (headless) sessions** — `claude -p` runs such as orchestrator workers or scripted jobs have nobody watching them; the interactive session that launched them reports their results. `notify.ps1` finds the Claude process behind the event (via Claude Code's session registry `~/.claude/sessions/<pid>.json`, matched on `session_id`, with a process-tree walk as fallback) and skips the toast when its command line has `-p`/`--print`. `$env:CLAUDE_TOAST_ALWAYS=1` overrides this too.
 - Toasts auto-dismiss after 60 seconds (configurable via `MessageDuration`)
 - Per-user install — no admin rights needed
 - Lives in `~/.claude/settings.local.json` so it doesn't interfere with anything synced via `~/.claude/settings.json`
@@ -122,7 +123,7 @@ This removes the hook scripts, unregisters the URL protocol, removes the `Stop` 
                                                                           ▼
                                                        Win32: AttachThreadInput + SetForegroundWindow
                                                        on the VS Code window whose title matches the
-                                                       project's leaf folder (from event.cwd)
+                                                       project's leaf folder (from CLAUDE_PROJECT_DIR)
 ```
 
 ### Components
@@ -141,6 +142,7 @@ This removes the hook scripts, unregisters the URL protocol, removes the `Stop` 
   - `Notification` — uses the `message` field from the event JSON
   - `PreToolUse` — toasts only for `AskUserQuestion` (shows the question text) and `ExitPlanMode` (plan approval). Everything else (auto-approved Read/Edit/Write) is silently skipped to avoid spam.
   - `PostToolUse` — silently skipped (tool completion is not a toast-worthy moment)
+  - Any event from a headless `claude -p` session — skipped (see Features)
   - Logs every decision to `%TEMP%\claude-toast.log`. Also writes the last raw JSON of each event type to `%TEMP%\claude-event-<Event>-last.json` for debugging when Claude Code changes its event schema.
 - **`focus-vscode.ps1`** — invoked when the toast button is clicked. Reads the project folder name (saved by `notify.ps1`) and matches it against `MainWindowTitle` of running `Code.exe` processes to pick the right window, then brings it forward via Win32 API. Uses `AttachThreadInput` + `AllowSetForegroundWindow` to bypass UIPI — Action Center launches the protocol handler without foreground rights, so a plain `SetForegroundWindow` silently fails.
 - **`claude-focus://` URL protocol** — Windows toast buttons can only trigger one of three activation types: a URL protocol, foreground app activation (needs a registered AppUserModelID), or background COM activation. We use a custom URL protocol because it's the simplest to register from a per-user installer.
@@ -149,7 +151,7 @@ This removes the hook scripts, unregisters the URL protocol, removes the `Stop` 
 
 `vscode://` is registered by VS Code, but it's primarily for opening files (`vscode://file/<path>`) or extension-defined routes. A bare `vscode://` URL doesn't reliably bring an existing window forward — and even when it does, it picks the most-recently-active VS Code window, which may not be the one running your Claude Code session if you have multiple windows.
 
-Our `claude-focus://` protocol points at a script that explicitly targets the project's window by matching the leaf folder name from Claude Code's `cwd` against the window title.
+Our `claude-focus://` protocol points at a script that explicitly targets the project's window by matching the project's leaf folder name (from `CLAUDE_PROJECT_DIR`) against the window title.
 
 ## Tested on
 

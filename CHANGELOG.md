@@ -2,6 +2,25 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-11-12
+
+- **Fixed: focused-window suppression silently stopped working.** The project
+  leaf came from the event's `cwd`, which follows every `cd` the session makes
+  (`my-app` → `my-app/tools`). The
+  drifted leaf matched no VS Code window title, so the toast fired even with the
+  project window in front — and was labeled with the wrong project, and its click
+  fell back to a random window. Now the leaf comes from `CLAUDE_PROJECT_DIR` (the
+  session root, set by Claude Code for hooks); `cwd` is only a fallback.
+- **No toasts from background (headless) sessions.** `claude -p` runs (orchestrator
+  workers, scripted jobs) have nobody to react;
+  the orchestrating interactive session reports their results. notify.ps1 looks up
+  the Claude process for the event's `session_id` in `~/.claude/sessions/<pid>.json`
+  and skips the toast when its command line has `-p`/`--print`. The registry's own
+  `kind` field is useless here (workers inherit the parent's env and report
+  `interactive`); a process-tree walk is the fallback only, because Git Bash exec
+  can leave a dead parent PID in the chain. Checked against 13 live sessions (8
+  headless, 5 interactive): all classified correctly.
+
 ## 2026-07-03
 
 - **Toast titles now carry the project name** — `Claude Code [my-app] — закончил ход`.
