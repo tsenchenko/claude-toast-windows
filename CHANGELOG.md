@@ -4,25 +4,28 @@ Newest first. Dates are commit dates.
 
 ## 2026-11-12
 
-- **Hooks narrowed back to what needs a toast** (user's synced `settings.json`, not
-  this repo — `install.ps1` always installed only `AskUserQuestion|ExitPlanMode`).
-  On 2026-06-08 the PreToolUse matcher had been widened to
-  `Read|Edit|Write|MultiEdit|NotebookEdit|…` and a PostToolUse hook added, for a
-  permission-prompt detection attempt that `PermissionRequest` replaced two days
-  later; the matcher was never narrowed back. Result: ~2,900 bash + PowerShell
-  launches a day across every session (headless workers too), each blocking its
-  Read/Edit for seconds (6–10 s per launch measured under load) just to be skipped.
-  Now PreToolUse matches `AskUserQuestion|ExitPlanMode` only, and PostToolUse
-  is gone. Running sessions picked the change up within a minute, no reload.
-- **Logs rotate at 1 MB** (`claude-toast.log`, `claude-toast-sh.log` → `.old`,
-  one generation kept). They had grown to 10–13 MB.
 - **Fixed: focused-window suppression silently stopped working.** The project
   leaf came from the event's `cwd`, which follows every `cd` the session makes
-  (`my-app` → `my-app/tools`). The
-  drifted leaf matched no VS Code window title, so the toast fired even with the
-  project window in front — and was labeled with the wrong project, and its click
-  fell back to a random window. Now the leaf comes from `CLAUDE_PROJECT_DIR` (the
-  session root, set by Claude Code for hooks); `cwd` is only a fallback.
+  (`my-app` → `my-app/tools`). The drifted leaf matched no VS Code window title,
+  so the toast fired even with the project window in front — labeled with the
+  wrong project, and its click fell back to a random window. Now the leaf comes
+  from `CLAUDE_PROJECT_DIR` (the session root, set by Claude Code for hooks);
+  `cwd` is only a fallback.
+- **Fixed: every question or permission prompt toasted twice.** Current Claude
+  Code also sends a `Notification` with `notification_type: permission_prompt`
+  ("Claude needs your permission to use …") for the same prompt that
+  `PermissionRequest` / `PreToolUse` already toasted. It landed 15–30 s later,
+  often after the prompt was answered. That notification type is now skipped;
+  other `Notification` types (e.g. `idle_prompt`) still toast.
+- **Cheap skip for events that never toast.** If `settings.json` hooks every
+  Read/Edit/Write — e.g. it is shared with an older `claude-banners-macos` install
+  that used a "waiting detector" — each tool call launched PowerShell (several
+  seconds under load, blocking the call) only to be skipped. `notify.sh` now drops
+  `PostToolUse` and non-question `PreToolUse` events in bash, before PowerShell.
+  Keep the `PreToolUse` matcher at `AskUserQuestion|ExitPlanMode` (what
+  `install.ps1` sets) so these hooks don't run at all.
+- **Logs rotate at 1 MB** (`claude-toast.log`, `claude-toast-sh.log` → `.old`,
+  one generation kept). They used to grow without limit.
 - **No toasts from background (headless) sessions.** `claude -p` runs (orchestrator
   workers, scripted jobs) have nobody to react;
   the orchestrating interactive session reports their results. notify.ps1 looks up

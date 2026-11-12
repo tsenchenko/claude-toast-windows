@@ -102,6 +102,14 @@ switch ($Event) {
         $body  = 'Готов к следующей задаче'
     }
     'Notification' {
+        # permission_prompt only repeats a toast that is already on screen:
+        # PermissionRequest covers tool approvals, PreToolUse covers
+        # AskUserQuestion/ExitPlanMode. It also lands 15-30 s later — often after
+        # the user has already answered. Other types (idle_prompt, ...) still toast.
+        if ($data -and [string]$data.notification_type -eq 'permission_prompt') {
+            Log "skipped: notification_type=permission_prompt (PermissionRequest/PreToolUse already toast it)"
+            exit 0
+        }
         $title = "Claude Code$projTag — нужно твоё внимание"
         if ($data -and $data.message) {
             $body = [string]$data.message

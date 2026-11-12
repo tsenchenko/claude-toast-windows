@@ -30,6 +30,21 @@ fi
 printf '%s [%s] notify.sh invoked, json_len=%d\n' \
     "$(date '+%Y-%m-%d %H:%M:%S')" "$EVENT" "${#JSON}" >> "$LOG_FILE" 2>/dev/null
 
+# Fast path: drop events Windows never toasts BEFORE starting PowerShell (several
+# seconds under load, and a PreToolUse hook blocks the tool call meanwhile). They
+# arrive when settings.json carries hooks on every Read/Edit/Write — e.g. shared
+# with an older claude-banners-macos install that used a "waiting detector".
+case "$EVENT" in
+    PostToolUse)
+        printf '%s [%s] fast-skip (no toast for this event)\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$EVENT" >> "$LOG_FILE" 2>/dev/null
+        exit 0 ;;
+    PreToolUse)
+        if ! printf '%s' "$JSON" | grep -qE '"tool_name"[[:space:]]*:[[:space:]]*"(AskUserQuestion|ExitPlanMode)"'; then
+            printf '%s [%s] fast-skip (tool needs no toast)\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$EVENT" >> "$LOG_FILE" 2>/dev/null
+            exit 0
+        fi ;;
+esac
+
 # Resolve Windows path to notify.ps1 (PowerShell needs a Windows-style path for -File)
 PS_SCRIPT_UNIX="$HOME/.claude/hooks/notify.ps1"
 if command -v cygpath >/dev/null 2>&1; then

@@ -33,7 +33,7 @@ Click "Open VS Code" on the toast to bring the right VS Code window forward (mat
 - **No toasts from background (headless) sessions** — `claude -p` runs such as orchestrator workers or scripted jobs have nobody watching them; the interactive session that launched them reports their results. `notify.ps1` finds the Claude process behind the event (via Claude Code's session registry `~/.claude/sessions/<pid>.json`, matched on `session_id`, with a process-tree walk as fallback) and skips the toast when its command line has `-p`/`--print`. `$env:CLAUDE_TOAST_ALWAYS=1` overrides this too.
 - Toasts auto-dismiss after 60 seconds (configurable via `MessageDuration`)
 - Per-user install — no admin rights needed
-- Lives in `~/.claude/settings.local.json` so it doesn't interfere with anything synced via `~/.claude/settings.json`
+- Lives in `~/.claude/settings.json` with portable `"$HOME/.claude/hooks/notify.sh"` commands, so a `settings.json` shared with a Mac keeps working on both
 
 ## Requirements
 
@@ -65,7 +65,9 @@ After install, **restart any open Claude Code session** so it picks up the new h
 
 ### Sharing settings.json across machines
 
-The hook command (`"$HOME/.claude/hooks/notify.sh" <Event>`) is intentionally portable — same string on Mac and Windows. If you sync `~/.claude/settings.json` between machines (Dropbox, Google Drive, Syncthing, dotfiles), the same `hooks` block works on both, as long as each OS has its own `notify.sh` locally. The macOS counterpart of this project provides the Mac-side `notify.sh`.
+The hook command (`"$HOME/.claude/hooks/notify.sh" <Event>`) is intentionally portable — same string on Mac and Windows. If you sync `~/.claude/settings.json` between machines (Dropbox, Google Drive, Syncthing, dotfiles), the same `hooks` block works on both, as long as each OS has its own `notify.sh` locally. The macOS counterpart of this project, [claude-banners-macos](https://github.com/tsenchenko/claude-banners-macos), provides the Mac-side `notify.sh`.
+
+Keep the `PreToolUse` matcher at `AskUserQuestion|ExitPlanMode` and don't hook `PostToolUse`. Every `PreToolUse` hook blocks its tool call until the hook exits, so a matcher on `Read|Edit|Write` makes every file operation in every session wait for a script. If a shared `settings.json` has such entries (older claude-banners-macos versions added them), `notify.sh` drops those events in bash before starting PowerShell, but removing them is better.
 
 ## Customize
 
@@ -139,7 +141,7 @@ This removes the hook scripts, unregisters the URL protocol, removes the `Stop` 
 - **`notify.ps1`** — receives event JSON on stdin and renders the toast through BurntToast. Per-event behavior:
   - `Stop` — hardcoded "turn complete" toast
   - `PermissionRequest` — shows the tool name and the command/description Claude is asking to run (`tool_input.command` / `description` / `file_path`)
-  - `Notification` — uses the `message` field from the event JSON
+  - `Notification` — uses the `message` field from the event JSON. Skips `notification_type: permission_prompt`: it repeats a prompt that `PermissionRequest` / `PreToolUse` already toasted, 15–30 s later
   - `PreToolUse` — toasts only for `AskUserQuestion` (shows the question text) and `ExitPlanMode` (plan approval). Everything else (auto-approved Read/Edit/Write) is silently skipped to avoid spam.
   - `PostToolUse` — silently skipped (tool completion is not a toast-worthy moment)
   - Any event from a headless `claude -p` session — skipped (see Features)
@@ -157,7 +159,7 @@ Our `claude-focus://` protocol points at a script that explicitly targets the pr
 
 - Windows 11 Pro 23H2 (build 26100)
 - PowerShell 5.1.26100
-- VS Code with the Claude Code extension
+- VS Code with the Claude Code extension (2.1.322)
 - BurntToast 1.1.0
 
 Should work on Windows 10 (1809+) and PowerShell 7. PRs welcome if you hit issues elsewhere.
