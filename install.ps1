@@ -165,18 +165,43 @@ $hooksBlock = [PSCustomObject]@{
     )
 }
 
-if ($settings.PSObject.Properties.Name -contains 'hooks') {
-    # Merge: preserve any existing event keys we don't manage (e.g. SessionStart).
-    foreach ($k in 'Stop','Notification','PermissionRequest','PreToolUse') {
-        if ($settings.hooks.PSObject.Properties.Name -contains $k) {
-            $settings.hooks.$k = $hooksBlock.$k
-        } else {
-            $settings.hooks | Add-Member -NotePropertyName $k -NotePropertyValue $hooksBlock.$k -Force
+# --- begin hook merge (kept self-contained; uninstall.ps1 has the same helpers) ---
+# Surgical merge: within each event only OUR hook entries (notify.sh / legacy
+# notify.ps1 commands) are replaced — never whole event arrays or whole groups.
+# A group can also hold someone else's command (e.g. a second Stop hook), and
+# other entries on the same event (e.g. a PreToolUse cost gate) must survive.
+# Re-running is idempotent. Our PostToolUse entry, which some shared setups
+# carry, is dropped: Windows never toasts on it.
+function Test-OurHook { param($h)
+    $h -and ([string]$h.command -match '[\\/]\.claude[\\/]hooks[\\/]notify\.(sh|ps1)')
+}
+function Remove-OurHooks { param($groups)
+    $out = @()
+    foreach ($g in @($groups)) {
+        if ($g -and $g.hooks -and @(@($g.hooks) | Where-Object { Test-OurHook $_ }).Count -gt 0) {
+            $rest = @(@($g.hooks) | Where-Object { -not (Test-OurHook $_) })
+            if ($rest.Count -gt 0) { $g.hooks = $rest; $out += $g }
+        } elseif ($null -ne $g) {
+            $out += $g
         }
     }
-} else {
-    $settings | Add-Member -NotePropertyName 'hooks' -NotePropertyValue $hooksBlock -Force
+    return ,$out
 }
+if (-not ($settings.PSObject.Properties.Name -contains 'hooks') -or -not $settings.hooks) {
+    $settings | Add-Member -NotePropertyName 'hooks' -NotePropertyValue (New-Object PSCustomObject) -Force
+}
+foreach ($k in 'Stop','Notification','PermissionRequest','PreToolUse') {
+    $kept = @()
+    if ($settings.hooks.PSObject.Properties.Name -contains $k) { $kept = Remove-OurHooks $settings.hooks.$k }
+    $merged = @($kept) + @($hooksBlock.$k)
+    $settings.hooks | Add-Member -NotePropertyName $k -NotePropertyValue $merged -Force
+}
+if ($settings.hooks.PSObject.Properties.Name -contains 'PostToolUse') {
+    $kept = Remove-OurHooks $settings.hooks.PostToolUse
+    if ($kept.Count -gt 0) { $settings.hooks.PostToolUse = $kept }
+    else { $settings.hooks.PSObject.Properties.Remove('PostToolUse') }
+}
+# --- end hook merge ---
 
 $json = $settings | ConvertTo-Json -Depth 12
 [System.IO.File]::WriteAllText($settingsPath, $json, (New-Object System.Text.UTF8Encoding($false)))

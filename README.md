@@ -58,7 +58,7 @@ The installer will:
 3. Copy `notify.sh`, `notify.ps1`, and `focus-vscode.ps1` to `~/.claude/hooks/`
 4. Register the `claude-focus://` URL protocol under `HKCU\Software\Classes\claude-focus`
 5. Set toast banner duration to 60 seconds (`HKCU:\Control Panel\Accessibility\MessageDuration`)
-6. Merge `Stop`, `Notification`, `PermissionRequest`, and `PreToolUse` (matched on `AskUserQuestion|ExitPlanMode`) hooks into `~/.claude/settings.json` using the portable command form `"$HOME/.claude/hooks/notify.sh" <Event>`. Existing event entries are preserved.
+6. Merge `Stop`, `Notification`, `PermissionRequest`, and `PreToolUse` (matched on `AskUserQuestion|ExitPlanMode`) hooks into `~/.claude/settings.json` using the portable command form `"$HOME/.claude/hooks/notify.sh" <Event>`. Only this project's own entries are replaced: other hooks on the same events, and other commands in the same hook group, are kept. A leftover `notify.sh` `PostToolUse` entry (from older shared setups) is removed. Safe to re-run.
 7. Send a test toast to confirm it works
 
 After install, **restart any open Claude Code session** so it picks up the new hooks (`Ctrl+Shift+P` → `Developer: Reload Window`).
@@ -92,7 +92,7 @@ Set-ItemProperty -Path "HKCU:\Control Panel\Accessibility" -Name MessageDuration
 irm https://raw.githubusercontent.com/tsenchenko/claude-toast-windows/main/uninstall.ps1 | iex
 ```
 
-This removes the hook scripts, unregisters the URL protocol, removes the `Stop` / `Notification` / `PermissionRequest` / `PreToolUse` entries from `~/.claude/settings.json` (other event keys like `SessionStart` are preserved), and resets `MessageDuration`. BurntToast and Git for Windows stay installed in case you use them elsewhere — remove BurntToast manually with `Uninstall-Module BurntToast` if you want.
+This removes the hook scripts, unregisters the URL protocol, removes this project's `notify.sh` entries from `~/.claude/settings.json` (every other hook — `SessionStart`, other commands on `Stop` or `PreToolUse` — is preserved), and resets `MessageDuration`. BurntToast and Git for Windows stay installed in case you use them elsewhere — remove BurntToast manually with `Uninstall-Module BurntToast` if you want.
 
 ## How it works
 

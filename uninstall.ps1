@@ -62,18 +62,37 @@ if (Test-Path $settingsPath) {
         if ($raw.Trim()) {
             $settings = $raw | ConvertFrom-Json
             if ($settings.PSObject.Properties.Name -contains 'hooks') {
-                $ours = @('Stop','Notification','PermissionRequest','PreToolUse')
-                $removed = @()
-                foreach ($k in $ours) {
-                    if ($settings.hooks.PSObject.Properties.Name -contains $k) {
-                        $cmd = $settings.hooks.$k[0].hooks[0].command
-                        if ($cmd -match 'notify\.sh|notify\.ps1') {
-                            $settings.hooks.PSObject.Properties.Remove($k)
-                            $removed += $k
+                # --- begin hook removal (same helpers as install.ps1) ---
+                # Remove only OUR hook entries (notify.sh / legacy notify.ps1),
+                # never whole events or groups: other commands on the same event
+                # or in the same group (a cost gate, a second Stop hook) stay.
+                function Test-OurHook { param($h)
+                    $h -and ([string]$h.command -match '[\\/]\.claude[\\/]hooks[\\/]notify\.(sh|ps1)')
+                }
+                function Remove-OurHooks { param($groups)
+                    $out = @()
+                    foreach ($g in @($groups)) {
+                        if ($g -and $g.hooks -and @(@($g.hooks) | Where-Object { Test-OurHook $_ }).Count -gt 0) {
+                            $rest = @(@($g.hooks) | Where-Object { -not (Test-OurHook $_) })
+                            if ($rest.Count -gt 0) { $g.hooks = $rest; $out += $g }
+                        } elseif ($null -ne $g) {
+                            $out += $g
                         }
                     }
+                    return ,$out
                 }
-                # Если hooks-блок остался пустым — снести его целиком
+                $removed = @()
+                foreach ($k in 'Stop','Notification','PermissionRequest','PreToolUse','PostToolUse') {
+                    if ($settings.hooks.PSObject.Properties.Name -contains $k) {
+                        $before = $settings.hooks.$k | ConvertTo-Json -Depth 12 -Compress
+                        $kept = Remove-OurHooks $settings.hooks.$k
+                        if (($kept | ConvertTo-Json -Depth 12 -Compress) -ne $before) { $removed += $k }
+                        if ($kept.Count -gt 0) { $settings.hooks.$k = $kept }
+                        else { $settings.hooks.PSObject.Properties.Remove($k) }
+                    }
+                }
+                # --- end hook removal ---
+                # Drop the hooks block entirely if nothing is left in it
                 if (-not $settings.hooks.PSObject.Properties.Name) {
                     $settings.PSObject.Properties.Remove('hooks')
                 }

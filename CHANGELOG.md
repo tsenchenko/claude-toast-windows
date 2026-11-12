@@ -24,6 +24,15 @@ Newest first. Dates are commit dates.
   `PostToolUse` and non-question `PreToolUse` events in bash, before PowerShell.
   Keep the `PreToolUse` matcher at `AskUserQuestion|ExitPlanMode` (what
   `install.ps1` sets) so these hooks don't run at all.
+- **Fixed: install/uninstall deleted other hooks.** `install.ps1` replaced the
+  whole `Stop` / `Notification` / `PermissionRequest` / `PreToolUse` arrays, so
+  re-running it wiped any other hook on those events (e.g. a `PreToolUse` cost
+  gate, a second `Stop` command). `uninstall.ps1` removed a whole event when its
+  first command was ours, or left our entry when it wasn't first. Both now
+  remove only `notify.sh` hook entries inside each group; the installer also
+  drops a leftover `notify.sh` `PostToolUse` entry. Verified under Windows
+  PowerShell 5.1 against a real shared `settings.json`: idempotent, other hooks
+  kept.
 - **Logs rotate at 1 MB** (`claude-toast.log`, `claude-toast-sh.log` → `.old`,
   one generation kept). They used to grow without limit.
 - **No toasts from background (headless) sessions.** `claude -p` runs (orchestrator
