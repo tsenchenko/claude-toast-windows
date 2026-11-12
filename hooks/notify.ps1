@@ -7,6 +7,9 @@
 try { [Console]::InputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 
 $logFile = Join-Path $env:TEMP 'claude-toast.log'
+# Keep the decision log bounded: at 1 MB rotate it to .old (one generation kept).
+# Without this it grew forever (10+ MB by 2026-11).
+try { if ((Test-Path $logFile) -and (Get-Item $logFile).Length -gt 1MB) { Move-Item -Force $logFile "$logFile.old" } } catch { }
 function Log { param([string]$Msg)
     try { "$([DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss')) [$Event] $Msg" | Out-File -FilePath $logFile -Append -Encoding utf8 } catch { }
 }

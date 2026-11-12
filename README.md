@@ -143,7 +143,7 @@ This removes the hook scripts, unregisters the URL protocol, removes the `Stop` 
   - `PreToolUse` — toasts only for `AskUserQuestion` (shows the question text) and `ExitPlanMode` (plan approval). Everything else (auto-approved Read/Edit/Write) is silently skipped to avoid spam.
   - `PostToolUse` — silently skipped (tool completion is not a toast-worthy moment)
   - Any event from a headless `claude -p` session — skipped (see Features)
-  - Logs every decision to `%TEMP%\claude-toast.log`. Also writes the last raw JSON of each event type to `%TEMP%\claude-event-<Event>-last.json` for debugging when Claude Code changes its event schema.
+  - Logs every decision to `%TEMP%\claude-toast.log` (rotated to `.old` at 1 MB, as is `claude-toast-sh.log`). Also writes the last raw JSON of each event type to `%TEMP%\claude-event-<Event>-last.json` for debugging when Claude Code changes its event schema.
 - **`focus-vscode.ps1`** — invoked when the toast button is clicked. Reads the project folder name (saved by `notify.ps1`) and matches it against `MainWindowTitle` of running `Code.exe` processes to pick the right window, then brings it forward via Win32 API. Uses `AttachThreadInput` + `AllowSetForegroundWindow` to bypass UIPI — Action Center launches the protocol handler without foreground rights, so a plain `SetForegroundWindow` silently fails.
 - **`claude-focus://` URL protocol** — Windows toast buttons can only trigger one of three activation types: a URL protocol, foreground app activation (needs a registered AppUserModelID), or background COM activation. We use a custom URL protocol because it's the simplest to register from a per-user installer.
 

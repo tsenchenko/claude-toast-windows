@@ -4,6 +4,18 @@ Newest first. Dates are commit dates.
 
 ## 2026-11-12
 
+- **Hooks narrowed back to what needs a toast** (user's synced `settings.json`, not
+  this repo — `install.ps1` always installed only `AskUserQuestion|ExitPlanMode`).
+  On 2026-06-08 the PreToolUse matcher had been widened to
+  `Read|Edit|Write|MultiEdit|NotebookEdit|…` and a PostToolUse hook added, for a
+  permission-prompt detection attempt that `PermissionRequest` replaced two days
+  later; the matcher was never narrowed back. Result: ~2,900 bash + PowerShell
+  launches a day across every session (headless workers too), each blocking its
+  Read/Edit for seconds (6–10 s per launch measured under load) just to be skipped.
+  Now PreToolUse matches `AskUserQuestion|ExitPlanMode` only, and PostToolUse
+  is gone. Running sessions picked the change up within a minute, no reload.
+- **Logs rotate at 1 MB** (`claude-toast.log`, `claude-toast-sh.log` → `.old`,
+  one generation kept). They had grown to 10–13 MB.
 - **Fixed: focused-window suppression silently stopped working.** The project
   leaf came from the event's `cwd`, which follows every `cd` the session makes
   (`my-app` → `my-app/tools`). The

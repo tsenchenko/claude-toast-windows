@@ -23,6 +23,10 @@ LOG_FILE="${TEMP:-/tmp}/claude-toast-sh.log"
 if command -v cygpath >/dev/null 2>&1 && [[ "$LOG_FILE" == *:* ]]; then
     LOG_FILE="$(cygpath -u "$LOG_FILE")"
 fi
+# Keep the log bounded: at 1 MB rotate it to .old (one generation kept).
+if [ -f "$LOG_FILE" ] && [ "$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+    mv -f "$LOG_FILE" "$LOG_FILE.old" 2>/dev/null
+fi
 printf '%s [%s] notify.sh invoked, json_len=%d\n' \
     "$(date '+%Y-%m-%d %H:%M:%S')" "$EVENT" "${#JSON}" >> "$LOG_FILE" 2>/dev/null
 
